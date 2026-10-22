@@ -1,10 +1,10 @@
-"""Turns Discord content into a review request and renders the result."""
+"""Discord draft model and rendering of review results as embeds."""
 
 from dataclasses import dataclass, field
 
 import discord
 from ai_engine.schemas.findings import Finding
-from ai_engine.schemas.review import ReviewDecision, ReviewInput, ReviewResult
+from ai_engine.schemas.review import ReviewDecision, ReviewResult
 
 MAX_FINDINGS_SHOWN = 6
 FIELD_LIMIT = 1024
@@ -33,9 +33,6 @@ class Draft:
     @property
     def is_empty(self) -> bool:
         return not self.has_text and not self.image_urls
-
-    def to_review_input(self, draft_id: str, brand_id: str) -> ReviewInput:
-        return ReviewInput(draft_id=draft_id, brand_id=brand_id, content_text=self.text)
 
 
 def _truncate(text: str, limit: int) -> str:

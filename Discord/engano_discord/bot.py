@@ -3,8 +3,9 @@ import logging
 import discord
 from discord import app_commands
 
+from engano_backend.review_service import ReviewService, ReviewSettings
+
 from .config import Settings, load_settings
-from .engine import make_repository, review
 from .review import Draft, render_result
 from .views import ReviewActions
 
@@ -16,7 +17,7 @@ class EnganoBot(discord.Client):
         # Interactions carry the content we need, so no privileged intents.
         super().__init__(intents=discord.Intents.default())
         self.settings = settings
-        self.repository = make_repository(settings)
+        self.reviews = ReviewService(ReviewSettings.from_env())
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
@@ -34,7 +35,7 @@ class EnganoBot(discord.Client):
     async def on_ready(self) -> None:
         log.info(
             "Logged in as %s, checking brand %s (policy source: %s)",
-            self.user, self.settings.brand_id, self.settings.policy_source,
+            self.user, self.reviews.settings.brand_id, self.reviews.settings.policy_source,
         )
 
 
@@ -58,7 +59,7 @@ def register_commands(tree: app_commands.CommandTree, bot: EnganoBot) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         draft_id = f"discord-{interaction.id}"
         try:
-            result = await review(draft.to_review_input(draft_id, settings.brand_id), bot.repository)
+            result = await bot.reviews.review_text(draft_id, draft.text)
         except Exception:
             log.exception("Review %s failed", draft_id)
             await interaction.followup.send(

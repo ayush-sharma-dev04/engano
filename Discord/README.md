@@ -14,10 +14,10 @@ Replies are ephemeral (only the caller sees them): 🟢 ready to publish, 🟡 n
 
 ## Setup
 
-From the repo root (the bot imports `ai_engine` from there):
+From the repo root (the bot imports `ai_engine` and the shared review service in `Backend/engano_backend` from there):
 
 ```
-make setup     # installs ai_engine + this bot into .venv
+make setup     # installs ai_engine, the backend and this bot into .venv
 make discord   # or `make start` for everything
 ```
 
@@ -36,6 +36,6 @@ Settings in the root `.env` (see `.env.example`):
 ## Code
 
 - `engano_discord/bot.py`: commands and reply flow (defers, then reviews off the event loop)
-- `engano_discord/engine.py`: picks the policy repository and calls `run_brand_review`
+- `Backend/engano_backend/review_service.py`: shared with WhatsApp; picks the policy source and calls `run_brand_review`
 - `engano_discord/review.py`: `Draft` → `ReviewInput`, and `ReviewResult` → Discord embed
 - `engano_discord/views.py`: buttons under each reply
