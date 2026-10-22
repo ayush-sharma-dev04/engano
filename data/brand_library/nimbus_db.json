@@ -1,0 +1,97 @@
+{
+  "brand_id": "nimbus_cloud",
+  "brand_name": "Nimbus Cloud",
+  "description": "Fictional cloud database brand policy for offline testing and benchmarks.",
+  "approved_terminology": [
+    {
+      "term_id": "term_nimbus_db",
+      "approved_term": "Nimbus DB",
+      "prohibited_variants": ["NimbusDB", "Nimbus-DB"],
+      "replacement_suggestion": "Nimbus DB",
+      "case_sensitive": false
+    }
+  ],
+  "claims_policy": {
+    "superlatives_require_benchmark": true,
+    "rule_reference": "Rule 4.2",
+    "superlative_patterns": [
+      "fastest database in the world",
+      "fastest database",
+      "best in the world",
+      "best database in the world"
+    ],
+    "forbidden_guarantees": [
+      "100% uptime",
+      "guaranteed results",
+      "zero downtime"
+    ],
+    "permitted_benchmarks": [
+      {
+        "benchmark_id": "Benchmark B-4",
+        "description": "Single-digit millisecond reads permitted only when citing Benchmark B-4 within p99 workload scope."
+      }
+    ]
+  },
+  "factual_rules": [
+    {
+      "rule_id": "fact_sla_uptime",
+      "topic": "uptime_sla",
+      "approved_fact": "Nimbus Cloud guarantees 99.95% monthly uptime SLA.",
+      "prohibited_claims": ["100% uptime", "100% SLA"],
+      "validity_start": "2024-01-01",
+      "validity_end": "2026-12-31",
+      "is_active": true
+    },
+    {
+      "rule_id": "fact_latency_reads",
+      "topic": "read_latency",
+      "approved_fact": "Single-digit millisecond reads under Benchmark B-4 test parameters.",
+      "prohibited_claims": [],
+      "validity_start": "2024-01-01",
+      "validity_end": "2026-12-31",
+      "is_active": true
+    }
+  ],
+  "offers": [
+    {
+      "offer_id": "offer_trial_14d",
+      "name": "14-day free trial",
+      "description": "Standard 14-day trial for new accounts.",
+      "is_retired": false,
+      "validity_start": "2024-01-01",
+      "validity_end": "2026-12-31"
+    },
+    {
+      "offer_id": "offer_free_forever",
+      "name": "free forever",
+      "description": "Legacy free tier offer retired as of January 2025.",
+      "is_retired": true,
+      "validity_start": "2023-01-01",
+      "validity_end": "2024-12-31",
+      "prohibited_phrases": ["free forever"]
+    }
+  ],
+  "tone_rules": [
+    {
+      "rule_id": "Rule 3.1",
+      "description": "Tone must remain confident, professional, and clear without aggressive or unverified hype.",
+      "required_tones": ["confident", "professional", "clear"],
+      "prohibited_tones": ["aggressive hype", "unsubstantiated boasting"]
+    }
+  ],
+  "accessibility_rules": {
+    "min_normal_contrast": 4.5,
+    "min_large_contrast": 3.0,
+    "require_alt_text": true
+  },
+  "legal_rules": [
+    {
+      "rule_id": "legal_disclaimer_sla",
+      "requirement": "SLA claims must state terms and service tier.",
+      "required_disclaimers": ["Terms and conditions apply to service SLA."]
+    }
+  ],
+  "test_fixtures": {
+    "sample_draft": "NimbusDB is the fastest database in the world, with 100% uptime. Try it free forever and see why teams love it!"
+  }
+}

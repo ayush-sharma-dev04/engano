@@ -1,0 +1,117 @@
+"""Central configuration for Engano AI/ML Review Engine.
+
+Uses Pydantic Settings to load and validate environment variables.
+Secrets are masked and never logged or displayed.
+"""
+
+from enum import Enum
+from functools import lru_cache
+from typing import Optional
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ProviderType(str, Enum):
+    RULES_ONLY = "rules_only"
+    OLLAMA = "ollama"
+    GEMINI = "gemini"
+    AUTO = "auto"
+
+
+class EngineConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    # Provider Selection
+    ai_provider: ProviderType = Field(
+        default=ProviderType.RULES_ONLY,
+        alias="AI_PROVIDER",
+        description="Active AI provider: rules_only, ollama, gemini, or auto"
+    )
+
+    # Google Gemini Configuration
+    gemini_api_key: Optional[SecretStr] = Field(
+        default=None,
+        alias="GEMINI_API_KEY",
+        description="Google Gemini API Key"
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        alias="GEMINI_MODEL",
+        description="Google Gemini model identifier"
+    )
+
+    # Local Ollama Configuration
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        alias="OLLAMA_BASE_URL",
+        description="Base URL for local Ollama service"
+    )
+    ollama_model: str = Field(
+        default="qwen2.5vl:3b",
+        alias="OLLAMA_MODEL",
+        description="Model identifier running in local Ollama instance"
+    )
+
+    # Supabase Configuration
+    supabase_url: Optional[str] = Field(
+        default=None,
+        alias="SUPABASE_URL",
+        description="Supabase project URL"
+    )
+    supabase_publishable_key: Optional[SecretStr] = Field(
+        default=None,
+        alias="SUPABASE_PUBLISHABLE_KEY",
+        description="Supabase public/anon API key"
+    )
+
+    # Execution and Review Parameters
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        alias="REQUEST_TIMEOUT_SECONDS",
+        description="Global timeout in seconds for external requests"
+    )
+    strict_mode: bool = Field(
+        default=False,
+        alias="STRICT_MODE",
+        description="When True, YELLOW or RED findings enforce strict reviewer approval"
+    )
+    safe_fallback: bool = Field(
+        default=False,
+        alias="SAFE_FALLBACK",
+        description="Enable safe fallback to deterministic rules if provider fails"
+    )
+
+    @field_validator("ai_provider", mode="before")
+    @classmethod
+    def parse_provider(cls, v: object) -> ProviderType:
+        if isinstance(v, str):
+            clean_v = v.strip().lower()
+            try:
+                return ProviderType(clean_v)
+            except ValueError:
+                valid = [p.value for p in ProviderType]
+                raise ValueError(f"Invalid AI_PROVIDER '{v}'. Must be one of: {valid}")
+        return v  # type: ignore
+
+    def validate_for_provider(self) -> None:
+        """Validate settings required by the actively selected provider."""
+        if self.ai_provider == ProviderType.GEMINI:
+            if not self.gemini_api_key or not self.gemini_api_key.get_secret_value().strip():
+                raise ValueError(
+                    "GEMINI_API_KEY must be configured when AI_PROVIDER='gemini'."
+                )
+        elif self.ai_provider == ProviderType.OLLAMA:
+            if not self.ollama_base_url.strip():
+                raise ValueError(
+                    "OLLAMA_BASE_URL must be configured when AI_PROVIDER='ollama'."
+                )
+
+
+@lru_cache()
+def get_engine_config() -> EngineConfig:
+    """Return cached EngineConfig instance loaded from environment."""
+    return EngineConfig()
