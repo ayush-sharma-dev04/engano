@@ -1,8 +1,37 @@
+# Secrets: only .env.example is committed
 .env
+.env.*
+!.env.example
+
+# Python
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / web studio
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs and tool output
+*.log
 graphify-out/
-
-

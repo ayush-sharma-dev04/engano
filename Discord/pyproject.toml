@@ -1,0 +1,15 @@
+[project]
+name = "engano-discord"
+version = "0.1.0"
+description = "ENGANO Discord channel adapter: /brand-check and the Check brand message action"
+requires-python = ">=3.11"
+# The bot imports ai_engine from the repo root, so it is installed into the
+# root .venv alongside requirements.txt and run from the root (`make discord`).
+dependencies = [
+    "discord.py>=2.4",
+    "python-dotenv>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

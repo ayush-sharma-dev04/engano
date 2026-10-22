@@ -1,0 +1,1 @@
+"""ENGANO Discord channel adapter."""
