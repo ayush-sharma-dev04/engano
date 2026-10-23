@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ai_engine import run_brand_review
+from ai_engine.adapters import get_adapter
 from ai_engine.integrations import (
     BasePolicyRepository,
     MockPolicyRepository,
@@ -18,7 +19,7 @@ from ai_engine.memory.store import (
 )
 from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.payload import DraftPayload
-from ai_engine.schemas.review import ReviewInput, ReviewResult
+from ai_engine.schemas.review import ReviewDecision, ReviewInput, ReviewResult
 
 from .env import REPO_ROOT, ROOT_ENV
 
@@ -95,3 +96,29 @@ class ReviewService:
         """Execute review directly on a normalized DraftPayload."""
         memory = self.get_brand_memory(payload.brand_id)
         return await asyncio.to_thread(run_brand_review, payload, self.repository, None, None, memory)
+
+    def build_payload(self, channel: str, raw: Any, draft_id: Optional[str] = None) -> DraftPayload:
+        """Normalize a channel's raw input with ai_engine's adapter for that channel.
+
+        The brand always comes from our settings, never from the sender's message.
+        """
+        return get_adapter(channel).normalize(raw, self.settings.brand_id, draft_id)
+
+
+def rewrite_check_note(result: ReviewResult) -> str | None:
+    """ai_engine re-reviews its own rewrite; say whether it passed."""
+    after = result.post_rewrite_decision
+    if after is None:
+        return None
+    if after.status == ReviewDecision.GREEN:
+        return "Re-checked: the rewrite passes."
+    count = len(result.post_rewrite_findings)
+    return f"Re-checked: the rewrite still has {count} issue{'s' if count != 1 else ''}."
+
+
+# Finding categories whose enum value doesn't read well once underscores become spaces.
+CATEGORY_LABELS = {"visual_wcag": "Accessibility"}
+
+
+def category_label(category: str) -> str:
+    return CATEGORY_LABELS.get(category) or category.replace("_", " ").capitalize()

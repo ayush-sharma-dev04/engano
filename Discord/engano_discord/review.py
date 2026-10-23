@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 
 import discord
 from ai_engine.schemas.findings import Finding
+from ai_engine.schemas.payload import DraftPayload
 from ai_engine.schemas.review import ReviewDecision, ReviewResult
+
+from engano_backend.review_service import ReviewService, category_label, rewrite_check_note
 
 MAX_FINDINGS_SHOWN = 6
 FIELD_LIMIT = 1024
@@ -18,12 +21,14 @@ DECISION_STYLE = {
 
 @dataclass
 class Draft:
-    """What a Discord user submitted, before it becomes a ReviewInput."""
+    """What a Discord user submitted, before ai_engine's Discord adapter normalizes it."""
 
     channel: str
     author_id: str
     text: str = ""
     image_urls: list[str] = field(default_factory=list)
+    # Discord's per-attachment "description" is the image's alt text; None when not set.
+    image_alt_texts: list[str | None] = field(default_factory=list)
     source_url: str | None = None
 
     @property
@@ -33,6 +38,14 @@ class Draft:
     @property
     def is_empty(self) -> bool:
         return not self.has_text and not self.image_urls
+
+
+def to_payload(reviews: ReviewService, draft: Draft, draft_id: str) -> DraftPayload:
+    payload = reviews.build_payload("discord", draft, draft_id)
+    # The adapter only knows image URLs; add the alt text Discord gave us.
+    for image, alt_text in zip(payload.images, draft.image_alt_texts):
+        image.alt_text = alt_text or None
+    return payload
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -45,7 +58,7 @@ def _code(text: str) -> str:
 
 
 def _finding_field(index: int, finding: Finding) -> tuple[str, str]:
-    name = f"{index}. {finding.category.value.replace('_', ' ').capitalize()} · {finding.severity.value}"
+    name = f"{index}. {category_label(finding.category.value)} · {finding.severity.value}"
     change = _code(finding.highlighted_text)
     if finding.suggested_fix:
         change += f" → {_code(finding.suggested_fix)}"
@@ -74,11 +87,14 @@ def render_result(draft: Draft, result: ReviewResult) -> discord.Embed:
         embed.add_field(name=f"…and {hidden} more", value="Open the draft in the studio to see all findings.", inline=False)
 
     if result.proposed_rewrite and result.proposed_rewrite.strip() != draft.text.strip():
-        embed.add_field(name="Suggested rewrite", value=_truncate(result.proposed_rewrite, FIELD_LIMIT), inline=False)
+        rewrite = result.proposed_rewrite
+        if note := rewrite_check_note(result):
+            rewrite += f"\n*{note}*"
+        embed.add_field(name="Suggested rewrite", value=_truncate(rewrite, FIELD_LIMIT), inline=False)
     if draft.image_urls:
         embed.add_field(
-            name="Images not checked",
-            value="Image checks run in the web studio. Only the text was reviewed here.",
+            name="Images",
+            value="Alt text was checked. What's inside the image isn't analysed yet.",
             inline=False,
         )
 
@@ -87,3 +103,4 @@ def render_result(draft: Draft, result: ReviewResult) -> discord.Embed:
         text=f"Brand: {result.brand_id} · {meta.provider_selected} · {meta.processing_time_ms:.0f} ms · {result.draft_id}"
     )
     return embed
+

@@ -1,6 +1,6 @@
 """Point Meta's WhatsApp webhook at the current public URL.
 
-Usage (from the repo root):
+Usage (from the repo root; also `python -m engano_whatsapp.register_webhook`):
     make webhook                      # use the running `make tunnel` quick tunnel
     make webhook URL=https://my.host  # or a given base URL
     make start                        # runs this with --wait after starting the tunnel

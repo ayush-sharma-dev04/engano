@@ -5,10 +5,15 @@ from typing import Any, Dict
 from fastapi import FastAPI, HTTPException
 from ai_engine.schemas.brand_memory import BrandMemory
 
+from engano_linkedin.client import LinkedInClient
+from engano_linkedin.config import LinkedInSettings
+from engano_linkedin.router import build_router as build_linkedin_router
+from engano_linkedin.token_store import TokenStore
+from engano_whatsapp.client import WhatsAppClient
+from engano_whatsapp.config import WhatsAppSettings
+from engano_whatsapp.router import build_router as build_whatsapp_router
+
 from .review_service import ReviewService, ReviewSettings
-from .whatsapp.client import WhatsAppClient
-from .whatsapp.config import WhatsAppSettings
-from .whatsapp.router import build_router as build_whatsapp_router
 
 log = logging.getLogger("engano.backend")
 
@@ -17,8 +22,12 @@ def create_app(
     review_service: ReviewService | None = None,
     whatsapp_settings: WhatsAppSettings | None = None,
     whatsapp_client: WhatsAppClient | None = None,
+    linkedin_settings: LinkedInSettings | None = None,
+    linkedin_client: LinkedInClient | None = None,
+    linkedin_store: TokenStore | None = None,
 ) -> FastAPI:
     review_service = review_service or ReviewService(ReviewSettings.from_env())
+
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()
     whatsapp_client = whatsapp_client or WhatsAppClient(
         whatsapp_settings.access_token, whatsapp_settings.graph_version
@@ -26,20 +35,29 @@ def create_app(
     for problem in whatsapp_settings.missing():
         log.warning("WhatsApp: %s", problem)
 
+    linkedin_settings = linkedin_settings or LinkedInSettings.from_env()
+    linkedin_client = linkedin_client or LinkedInClient(linkedin_settings)
+    linkedin_store = linkedin_store or TokenStore(linkedin_settings.token_path)
+    if missing := linkedin_settings.missing():
+        log.warning("LinkedIn: %s not set; publishing is disabled", ", ".join(missing))
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
         await whatsapp_client.aclose()
+        await linkedin_client.aclose()
 
     app = FastAPI(title="ENGANO API", version="0.1.0", lifespan=lifespan)
 
     @app.get("/api/health")
     async def health():
+        linkedin_token = linkedin_store.load()
         return {
             "status": "ok",
             "brand_id": review_service.settings.brand_id,
             "policy_source": review_service.settings.policy_source,
             "whatsapp_configured": not whatsapp_settings.missing(),
+            "linkedin_connected": bool(linkedin_token and not linkedin_token.expired),
         }
 
     # Brand Memory API Endpoints
@@ -97,4 +115,5 @@ def create_app(
         build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client),
         prefix="/api/webhooks/whatsapp",
     )
+    app.include_router(build_linkedin_router(review_service, linkedin_settings, linkedin_client, linkedin_store))
     return app

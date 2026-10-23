@@ -35,3 +35,6 @@ supabase/.branches/
 # Logs and tool output
 *.log
 graphify-out/
+
+# LinkedIn OAuth token cache (until tokens move to Supabase)
+.linkedin_token.json

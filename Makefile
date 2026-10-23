@@ -7,9 +7,13 @@ PY    := $(VENV)/bin/python
 PORT  ?= 8000
 # Our tunnel's own metrics address, so `make webhook` finds this tunnel and not another cloudflared.
 TUNNEL_METRICS := 127.0.0.1:20249
+# Local AI settings, read from .env so `make start` knows whether to run Ollama.
+AI_PROVIDER  := $(shell sed -n 's/^AI_PROVIDER=//p' .env 2>/dev/null)
+OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen2.5vl:3b)
+OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: help pull setup start discord backend tunnel webhook web test benchmark clean
+.PHONY: help pull setup start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -17,38 +21,60 @@ help: ## Show this list
 pull: ## Pull the latest commits (fast-forward only, never merges)
 	git pull --ff-only
 
-setup: ## Install the AI engine, backend and Discord bot into .venv
-	@test -d $(VENV) || uv venv $(VENV)
-	uv pip install -q --python $(PY) -r requirements.txt -e ./Backend -e ./Discord
+CHANNELS := Discord WhatsApp Gmail LinkedIn
 
-start: setup ## Start everything: Discord bot, backend, tunnel + WhatsApp webhook, web studio (Ctrl+C stops all)
+setup: ## Install the AI engine, backend and every channel into .venv
+	@test -d $(VENV) || uv venv $(VENV)
+	uv pip install -q --python $(PY) -r requirements.txt -e ./Backend $(foreach c,$(CHANNELS),-e ./$(c))
+
+start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Discord, Gmail, tunnel + webhook (Ctrl+C stops all)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' INT TERM; \
+	if [ "$(AI_PROVIDER)" = ollama ]; then $(MAKE) --no-print-directory ollama & fi; \
 	$(MAKE) --no-print-directory discord & \
 	$(MAKE) --no-print-directory backend & \
+	$(MAKE) --no-print-directory gmail & \
 	if command -v cloudflared >/dev/null; then \
 		$(MAKE) --no-print-directory tunnel & \
-		$(PY) Backend/scripts/register_whatsapp_webhook.py --wait --metrics $(TUNNEL_METRICS) --port $(PORT) & \
+		$(PY) -m engano_whatsapp.register_webhook --wait --metrics $(TUNNEL_METRICS) --port $(PORT) & \
 	else echo "Tunnel: cloudflared not installed, WhatsApp won't receive messages"; fi; \
 	if [ -f WebStudio/package.json ]; then $(MAKE) --no-print-directory web & else echo "WebStudio: no package.json yet, skipping"; fi; \
+	wait
+
+ollama: ## Run the local AI model (Ollama): start the server, download the model if missing, load it
+	@if curl -sf -m 1 $(OLLAMA_URL)/api/version >/dev/null; then \
+		echo "Ollama: already running"; \
+	else \
+		OLLAMA_KEEP_ALIVE=1h ollama serve >/dev/null 2>&1 & \
+		until curl -sf -m 1 $(OLLAMA_URL)/api/version >/dev/null; do sleep 0.5; done; \
+	fi; \
+	ollama list | grep -q "^$(OLLAMA_MODEL) " || ollama pull $(OLLAMA_MODEL); \
+	curl -sf $(OLLAMA_URL)/api/generate -d '{"model":"$(OLLAMA_MODEL)","keep_alive":"1h"}' >/dev/null \
+		&& echo "Ollama: $(OLLAMA_MODEL) loaded (on $$(ollama ps | grep -oE '[0-9/%]+ (CPU|GPU)[/A-Z]*' | head -1))"; \
 	wait
 
 discord: ## Run the Discord bot (run from the root so it can import ai_engine)
 	$(PY) -m engano_discord.bot
 
-backend: ## Run the FastAPI backend on :8000 (PORT=…) (WhatsApp webhook, health check)
+backend: ## Run the FastAPI backend on :8000 (WhatsApp webhook, LinkedIn routes, health)
 	$(PY) -m uvicorn main:app --reload --app-dir Backend --port $(PORT)
+
+gmail: ## Run the Gmail review inbox (checks for new email every 15 s)
+	$(PY) -m engano_gmail
+
+linkedin: ## Connect a LinkedIn account (opens the sign-in page; backend must be running)
+	xdg-open http://localhost:$(PORT)/api/oauth/linkedin/start
 
 tunnel: ## Public HTTPS URL for the backend (then `make webhook`; `make start` does both)
 	cloudflared tunnel --no-autoupdate --loglevel warn --metrics $(TUNNEL_METRICS) --url http://localhost:$(PORT)
 
 webhook: ## Point Meta's WhatsApp webhook at the running tunnel (or URL=https://...)
-	$(PY) Backend/scripts/register_whatsapp_webhook.py --metrics $(TUNNEL_METRICS) $(if $(URL),--url $(URL))
+	$(PY) -m engano_whatsapp.register_webhook --metrics $(TUNNEL_METRICS) $(if $(URL),--url $(URL))
 
 web: ## Run the web studio dev server (once WebStudio/package.json exists)
 	cd WebStudio && npm install && npm run dev
 
-test: setup ## Run the AI engine and backend tests
-	$(PY) -m pytest ai_engine/tests Backend/tests -q
+test: setup ## Run the AI engine and channel tests
+	$(PY) -m pytest ai_engine/tests $(foreach c,$(CHANNELS),$(wildcard $(c)/tests)) -q
 
 benchmark: setup ## Run the AI engine on the Nimbus DB sample draft
 	$(PY) ai_engine/benchmark.py

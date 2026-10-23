@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 
 from engano_backend.app import create_app
 from engano_backend.review_service import ReviewService, ReviewSettings
-from engano_backend.whatsapp.config import WhatsAppSettings
-from engano_backend.whatsapp.payload import parse_messages
-from engano_backend.whatsapp.signature import verify_signature
+from engano_whatsapp.config import WhatsAppSettings
+from engano_whatsapp.payload import parse_messages
+from engano_whatsapp.signature import verify_signature
 
 SECRET = "test-app-secret"
 VERIFY = "test-verify-token"
@@ -127,9 +127,16 @@ def test_help_image_and_unsupported(client, fake):
     signed_post(client, message("wamid.8", type="audio", audio={"id": "media3"}))
     help_text, image_only, captioned, unsupported = (m["text"] for m in fake.sent)
     assert "ENGANO brand check" in help_text
-    assert "Image checks run in the ENGANO web studio" in image_only
-    assert "Needs reviewer approval" in captioned and "Image not checked" in captioned
+    # Image-only drafts now go through the engine (alt text has no source on WhatsApp).
+    assert "Accessibility" in image_only and "alternative text" in image_only and "isn't analysed yet" in image_only
+    assert "Needs reviewer approval" in captioned and "isn't analysed yet" in captioned
     assert "only check text" in unsupported
+
+
+def test_rewrite_is_rechecked(client, fake):
+    signed_post(client, text_message("wamid.10", "NimbusDB has 100% uptime."))
+    text = fake.sent[0]["text"]
+    assert "Suggested rewrite" in text and "Re-checked: the rewrite passes." in text
 
 
 def test_status_updates_are_ignored(client, fake):

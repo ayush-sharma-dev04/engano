@@ -6,7 +6,7 @@ Discord entry point for ENGANO. A gateway bot (discord.py) that sends drafts to 
 
 | Command | What it does |
 |---|---|
-| `/brand-check text:<draft> image:<file>` | Reviews the copy (images are noted but checked in the web studio) |
+| `/brand-check text:<draft> image:<file>` | Reviews the copy, plus each image's alt text (set it in Discord's attachment description). Image contents aren't analysed yet |
 | **Apps → Check brand** (right-click a message) | Reviews that message's text |
 | `/engano-help` | Short how-to |
 

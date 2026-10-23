@@ -1,0 +1,15 @@
+[project]
+name = "engano-whatsapp"
+version = "0.1.0"
+description = "ENGANO WhatsApp adapter: Meta Cloud API webhook (mounted by the backend)"
+requires-python = ">=3.11"
+# Uses the shared review service in Backend/ (engano_backend) and ai_engine from
+# the repo root, so it is installed into the root .venv (`make setup`).
+dependencies = ["fastapi>=0.115", "httpx>=0.28"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["engano_whatsapp"]

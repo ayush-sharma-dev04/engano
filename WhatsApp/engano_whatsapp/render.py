@@ -3,21 +3,20 @@
 from ai_engine.schemas.findings import Finding
 from ai_engine.schemas.review import ReviewDecision, ReviewResult
 
+from engano_backend.review_service import category_label, rewrite_check_note
+
 MESSAGE_LIMIT = 4096
 MAX_FINDINGS_SHOWN = 5
 
 HELP_TEXT = (
     "*ENGANO brand check*\n"
-    "Send me the text of a post, email or flyer before you publish it, and I'll check it "
+    "Send me the text of a post, email or flyer (or an image with the text as its caption) "
+    "before you publish it, and I'll check it "
     "against your brand guidelines and approved facts.\n\n"
     "You'll get a verdict, each problem with the rule it breaks, and a suggested fix. "
     "Nothing is approved or published from WhatsApp."
 )
-IMAGE_ONLY_TEXT = (
-    "Image checks run in the ENGANO web studio for now. "
-    "Send the post's text (or add it as the image caption) to check it here."
-)
-UNSUPPORTED_TEXT = "I can only check text messages, or images with a caption. Send *help* for how it works."
+UNSUPPORTED_TEXT = "I can only check text messages and images. Send *help* for how it works."
 ERROR_TEXT = "Something went wrong while reviewing this draft. Nothing was approved. Please try again in a moment."
 
 HELP_WORDS = {"help", "hi", "hello", "start", "menu"}
@@ -39,7 +38,7 @@ def _quote(text: str) -> str:
 
 
 def _finding(index: int, finding: Finding) -> str:
-    title = f"*{index}. {finding.category.value.replace('_', ' ').capitalize()}* · {finding.severity.value}"
+    title = f"*{index}. {category_label(finding.category.value)}* · {finding.severity.value}"
     change = _quote(finding.highlighted_text)
     if finding.suggested_fix:
         change += f" → {_quote(finding.suggested_fix)}"
@@ -66,9 +65,12 @@ def render_result(result: ReviewResult, original_text: str, had_image: bool = Fa
         parts.append(f"_…and {hidden} more. Open the draft in the studio to see all findings._")
 
     if result.proposed_rewrite and result.proposed_rewrite.strip() != original_text.strip():
-        parts.append(f"*Suggested rewrite*\n{result.proposed_rewrite}")
+        rewrite = f"*Suggested rewrite*\n{result.proposed_rewrite}"
+        if note := rewrite_check_note(result):
+            rewrite += f"\n_{note}_"
+        parts.append(rewrite)
     if had_image:
-        parts.append("_Image not checked: image checks run in the web studio. Only the caption was reviewed._")
+        parts.append("_Image: accessibility was checked. What's inside the image isn't analysed yet._")
     parts.append(f"_Brand: {result.brand_id} · ref {result.draft_id}_")
 
     body = "\n\n".join(parts)

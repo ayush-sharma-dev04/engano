@@ -6,7 +6,7 @@ from discord import app_commands
 from engano_backend.review_service import ReviewService, ReviewSettings
 
 from .config import Settings, load_settings
-from .review import Draft, render_result
+from .review import Draft, render_result, to_payload
 from .views import ReviewActions
 
 log = logging.getLogger("engano.discord")
@@ -48,18 +48,12 @@ def register_commands(tree: app_commands.CommandTree, bot: EnganoBot) -> None:
                 "There's nothing to check. Add some text or an image.", ephemeral=True
             )
             return
-        if not draft.has_text:
-            await interaction.response.send_message(
-                "Image-only checks run in the web studio for now. Add the post's text to check it here.",
-                ephemeral=True,
-            )
-            return
 
         # The engine can take longer than Discord's 3 second reply window.
         await interaction.response.defer(ephemeral=True, thinking=True)
         draft_id = f"discord-{interaction.id}"
         try:
-            result = await bot.reviews.review_text(draft_id, draft.text)
+            result = await bot.reviews.review_payload(to_payload(bot.reviews, draft, draft_id))
         except Exception:
             log.exception("Review %s failed", draft_id)
             await interaction.followup.send(
@@ -98,21 +92,21 @@ def register_commands(tree: app_commands.CommandTree, bot: EnganoBot) -> None:
                 author_id=str(interaction.user.id),
                 text=text or "",
                 image_urls=[image.url] if image else [],
+                image_alt_texts=[image.description] if image else [],
             ),
         )
 
     @tree.context_menu(name="Check brand")
     async def check_brand(interaction: discord.Interaction, message: discord.Message):
-        images = [
-            a.url for a in message.attachments if (a.content_type or "").startswith("image/")
-        ]
+        images = [a for a in message.attachments if (a.content_type or "").startswith("image/")]
         await reply(
             interaction,
             Draft(
                 channel="discord",
                 author_id=str(interaction.user.id),
                 text=message.content,
-                image_urls=images,
+                image_urls=[a.url for a in images],
+                image_alt_texts=[a.description for a in images],
                 source_url=message.jump_url,
             ),
         )
@@ -121,7 +115,7 @@ def register_commands(tree: app_commands.CommandTree, bot: EnganoBot) -> None:
     async def engano_help(interaction: discord.Interaction):
         await interaction.response.send_message(
             "**ENGANO** checks drafts against your brand guidelines before you publish.\n"
-            "• `/brand-check text:<draft>` checks a piece of copy.\n"
+            "• `/brand-check text:<draft>` checks a piece of copy. Attach an image to check its alt text too.\n"
             "• Right-click a message → **Apps → Check brand** checks that message.\n"
             "Each finding cites the rule it's based on and suggests a fix. "
             "Nothing is published or approved from Discord. Replies are only visible to you.",

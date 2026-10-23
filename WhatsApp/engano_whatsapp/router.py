@@ -13,14 +13,13 @@ from collections import OrderedDict
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
-from ..review_service import ReviewService
+from engano_backend.review_service import ReviewService
 from .client import WhatsAppClient
 from .config import WhatsAppSettings
 from .payload import IncomingMessage, parse_messages
 from .render import (
     ERROR_TEXT,
     HELP_TEXT,
-    IMAGE_ONLY_TEXT,
     UNSUPPORTED_TEXT,
     is_help_request,
     render_result,
@@ -67,16 +66,14 @@ def build_router(
             if msg.kind not in ("text", "image"):
                 await reply(msg, UNSUPPORTED_TEXT)
                 return
-            if not msg.text.strip():
-                await reply(msg, IMAGE_ONLY_TEXT)
-                return
             if msg.kind == "text" and is_help_request(msg.text):
                 await reply(msg, HELP_TEXT)
                 return
 
-            draft_id = f"whatsapp-{msg.message_id}"
+            payload = review_service.build_payload("whatsapp", msg)
+            draft_id = payload.draft_id
             try:
-                result = await review_service.review_text(draft_id, msg.text)
+                result = await review_service.review_payload(payload)
             except Exception:
                 log.exception("Review %s failed", draft_id)
                 await reply(msg, ERROR_TEXT)
