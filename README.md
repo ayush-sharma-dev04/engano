@@ -94,6 +94,8 @@ GEMINI_API_KEY=your_gemini_api_key_here
 OLLAMA_BASE_URL=http://localhost:11434
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+SUPABASE_SECRET_KEY=backend_only_secret_key
+ENGANO_MEMORY_API_KEY=backend_only_memory_api_key
 ```
 
 ### 3. Supabase Integration Boundary
@@ -104,6 +106,8 @@ Requirements for Supabase database setup:
 * Table Name: `brand_policies`
 * Expected Columns: `brand_id` (primary key), `brand_name`, `approved_terminology`, `claims_policy`, `factual_rules`, `offers`, `tone_rules`, `accessibility_rules`, `legal_rules`.
 * Security Guardrail: If Supabase credentials are missing or unauthorized, the engine throws an explicit `RuntimeError` or `PermissionError`. It will never silently fall back to testing fixtures in production.
+
+Brand memory is defined by `supabase/migrations/20261023_000001_create_brand_memory.sql` and hardened by `supabase/migrations/20261023_000002_restrict_brand_memory_access.sql`. The table has RLS enabled and no `anon` or `authenticated` grants or policies; only the backend Supabase secret-key role has table privileges. Keep `SUPABASE_SECRET_KEY` server-side. The backend `/api/brand-memory` management routes are disabled unless `ENGANO_MEMORY_API_KEY` is set and supplied in the `X-Engano-Memory-Key` header. This shared server key is an interim admin boundary, not per-user or per-tenant authorization.
 
 ---
 

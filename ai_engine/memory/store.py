@@ -16,6 +16,7 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, Optional
 import httpx
+from pydantic import ValidationError
 from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
 
@@ -147,26 +148,51 @@ class SupabaseBrandMemoryStore(BaseBrandMemoryStore):
         http_client: Optional[httpx.Client] = None,
     ) -> None:
         self.config = config or get_engine_config()
-        self.supabase_url = self.config.supabase_url
-        self.publishable_key = (
-            self.config.supabase_publishable_key.get_secret_value()
-            if self.config.supabase_publishable_key
+        self.supabase_url = self.config.supabase_url.strip() if self.config.supabase_url else None
+        self.secret_key = (
+            self.config.supabase_secret_key.get_secret_value().strip()
+            if self.config.supabase_secret_key
             else None
         )
         self.timeout = self.config.request_timeout_seconds
         self._client = http_client or httpx.Client(timeout=self.timeout)
 
     def _get_headers(self) -> Dict[str, str]:
-        if not self.supabase_url or not self.publishable_key:
+        if not self.supabase_url or not self.secret_key:
             raise RuntimeError(
-                "Supabase brand memory storage unconfigured. SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required."
+                "Supabase brand memory storage unconfigured. SUPABASE_URL and SUPABASE_SECRET_KEY are required."
             )
-        return {
-            "apikey": self.publishable_key,
-            "Authorization": f"Bearer {self.publishable_key}",
+        headers = {
+            "apikey": self.secret_key,
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        return headers
+
+    @staticmethod
+    def _raise_for_response(
+        response: httpx.Response,
+        operation: str,
+        allowed_statuses: tuple[int, ...] = (200,),
+    ) -> None:
+        if response.status_code == 404:
+            raise RuntimeError(
+                "Supabase 'brand_memory' table does not exist in schema cache. Database migration required."
+            )
+        if response.status_code in (401, 403):
+            raise PermissionError(f"Supabase permission denied (HTTP {response.status_code})")
+        if response.status_code not in allowed_statuses:
+            raise RuntimeError(f"Supabase {operation} returned HTTP {response.status_code}")
+
+    @staticmethod
+    def _read_records(response: httpx.Response) -> list[Dict[str, Any]]:
+        try:
+            records = response.json()
+        except ValueError:
+            raise RuntimeError("Supabase returned invalid JSON for brand memory.") from None
+        if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+            raise RuntimeError("Supabase returned an invalid brand memory response shape.")
+        return records
 
     def get_memory(self, brand_id: str) -> Optional[BrandMemory]:
         headers = self._get_headers()
@@ -175,39 +201,69 @@ class SupabaseBrandMemoryStore(BaseBrandMemoryStore):
 
         try:
             resp = self._client.get(endpoint, headers=headers, params=params)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to connect to Supabase memory store: {exc}") from exc
-
-        if resp.status_code == 404:
+        except httpx.RequestError as exc:
             raise RuntimeError(
-                "Supabase 'brand_memory' table does not exist in schema cache. Database migration required."
-            )
-        if resp.status_code in (401, 403):
-            raise PermissionError(f"Supabase permission denied (HTTP {resp.status_code})")
-        if resp.status_code != 200:
-            raise RuntimeError(f"Supabase returned HTTP {resp.status_code}: {resp.text}")
+                f"Failed to connect to Supabase memory store: {type(exc).__name__}"
+            ) from exc
 
-        records = resp.json()
+        self._raise_for_response(resp, "memory query")
+        records = self._read_records(resp)
         if not records:
             return None
-        return BrandMemory.model_validate(records[0])
+        if len(records) != 1:
+            raise ValueError("Supabase returned multiple records for a unique brand_id.")
+        try:
+            memory = BrandMemory.model_validate(records[0])
+        except ValidationError:
+            raise RuntimeError("Supabase brand memory failed validation.") from None
+        if memory.brand_id != brand_id.strip().lower():
+            raise RuntimeError("Supabase returned a brand memory for a different brand_id.")
+        return memory
 
     def save_memory(self, memory: BrandMemory) -> None:
         headers = self._get_headers()
-        headers["Prefer"] = "resolution=merge-duplicates"
+        headers["Prefer"] = "resolution=merge-duplicates,return=minimal"
         endpoint = f"{self.supabase_url.rstrip('/')}/rest/v1/brand_memory"
+        params = {"on_conflict": "brand_id"}
 
         try:
-            resp = self._client.post(endpoint, headers=headers, json=memory.model_dump())
-        except Exception as exc:
-            raise RuntimeError(f"Failed to connect to Supabase memory store: {exc}") from exc
-
-        if resp.status_code == 404:
-            raise RuntimeError(
-                "Supabase 'brand_memory' table does not exist in schema cache. Database migration required."
+            resp = self._client.post(
+                endpoint,
+                headers=headers,
+                params=params,
+                json=memory.model_dump(mode="json"),
             )
-        if resp.status_code not in (200, 201):
-            raise RuntimeError(f"Failed to save brand memory to Supabase: HTTP {resp.status_code}: {resp.text}")
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to connect to Supabase memory store: {type(exc).__name__}"
+            ) from exc
+
+        self._raise_for_response(resp, "memory upsert", (200, 201, 204))
+
+    def insert_memory_if_absent(self, memory: BrandMemory) -> bool:
+        """Insert a memory only if its brand_id does not already exist."""
+        headers = self._get_headers()
+        headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
+        endpoint = f"{self.supabase_url.rstrip('/')}/rest/v1/brand_memory"
+        params = {"on_conflict": "brand_id"}
+
+        try:
+            resp = self._client.post(
+                endpoint,
+                headers=headers,
+                params=params,
+                json=memory.model_dump(mode="json"),
+            )
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to connect to Supabase memory store: {type(exc).__name__}"
+            ) from exc
+
+        self._raise_for_response(resp, "memory insert", (200, 201, 204))
+        if resp.status_code == 204:
+            return False
+        records = self._read_records(resp)
+        return any(record.get("brand_id") == memory.brand_id for record in records)
 
     def update_preferences(self, brand_id: str, updates: Dict[str, Any]) -> BrandMemory:
         current = self.get_memory(brand_id)
@@ -239,17 +295,43 @@ class SupabaseBrandMemoryStore(BaseBrandMemoryStore):
 
     def delete_memory(self, brand_id: str) -> bool:
         headers = self._get_headers()
+        headers["Prefer"] = "return=representation"
         endpoint = f"{self.supabase_url.rstrip('/')}/rest/v1/brand_memory"
         params = {"brand_id": f"eq.{brand_id}"}
-        resp = self._client.delete(endpoint, headers=headers, params=params)
-        return resp.status_code in (200, 204)
+        try:
+            resp = self._client.delete(endpoint, headers=headers, params=params)
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to connect to Supabase memory store: {type(exc).__name__}"
+            ) from exc
+
+        self._raise_for_response(resp, "memory delete", (200, 204))
+        if resp.status_code == 204:
+            return False
+        return bool(self._read_records(resp))
 
 
 def get_brand_memory_store(config: Optional[EngineConfig] = None) -> BaseBrandMemoryStore:
-    """Resolve configured brand memory store."""
+    """Resolve configured brand memory store.
+
+    Explicit config values take precedence for tests and injected dependencies. When no
+    config object is supplied, environment variables still apply.
+    """
     cfg = config or get_engine_config()
-    source = os.getenv("ENGANO_MEMORY_SOURCE", cfg.memory_source).strip().lower()
+    source = cfg.memory_source.strip().lower() if config is not None else os.getenv(
+        "ENGANO_MEMORY_SOURCE", cfg.memory_source
+    ).strip().lower()
 
     if source == "supabase":
         return SupabaseBrandMemoryStore(config=cfg)
+    if source == "auto":
+        supabase_url = (cfg.supabase_url or "").strip()
+        supabase_key = (
+            cfg.supabase_secret_key.get_secret_value().strip()
+            if cfg.supabase_secret_key is not None
+            else ""
+        )
+        if supabase_url and supabase_key:
+            return SupabaseBrandMemoryStore(config=cfg)
+        return FileBrandMemoryStore(storage_dir=cfg.memory_storage_dir)
     return FileBrandMemoryStore(storage_dir=cfg.memory_storage_dir)

@@ -1,8 +1,10 @@
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
+from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
 
 from engano_linkedin.client import LinkedInClient
@@ -25,10 +27,12 @@ def create_app(
     linkedin_settings: LinkedInSettings | None = None,
     linkedin_client: LinkedInClient | None = None,
     linkedin_store: TokenStore | None = None,
+    engine_config: EngineConfig | None = None,
 ) -> FastAPI:
     review_service = review_service or ReviewService(ReviewSettings.from_env())
 
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()
+    engine_config = engine_config or get_engine_config()
     whatsapp_client = whatsapp_client or WhatsAppClient(
         whatsapp_settings.access_token, whatsapp_settings.graph_version
     )
@@ -49,6 +53,18 @@ def create_app(
 
     app = FastAPI(title="ENGANO API", version="0.1.0", lifespan=lifespan)
 
+    async def require_brand_memory_key(
+        x_engano_memory_key: str | None = Header(default=None),
+    ) -> None:
+        configured_key = engine_config.brand_memory_api_key
+        if configured_key is None or not configured_key.get_secret_value().strip():
+            raise HTTPException(status_code=503, detail="Brand memory API is unavailable.")
+        if x_engano_memory_key is None or not secrets.compare_digest(
+            x_engano_memory_key,
+            configured_key.get_secret_value(),
+        ):
+            raise HTTPException(status_code=401, detail="Unauthorized.")
+
     @app.get("/api/health")
     async def health():
         linkedin_token = linkedin_store.load()
@@ -61,9 +77,13 @@ def create_app(
         }
 
     # Brand Memory API Endpoints
-    @app.get("/api/brand-memory")
+    @app.get("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])
     async def get_active_brand_memory():
-        memory = review_service.get_brand_memory()
+        try:
+            memory = review_service.get_brand_memory()
+        except (OSError, RuntimeError, ValueError):
+            log.exception("Failed to read active brand memory")
+            raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
         if not memory:
             raise HTTPException(
                 status_code=404,
@@ -71,45 +91,49 @@ def create_app(
             )
         return memory
 
-    @app.get("/api/brand-memory/{brand_id}")
+    @app.get("/api/brand-memory/{brand_id}", dependencies=[Depends(require_brand_memory_key)])
     async def get_brand_memory(brand_id: str):
         try:
             memory = review_service.get_brand_memory(brand_id)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Storage error: {exc}")
+        except (OSError, RuntimeError, ValueError):
+            log.exception("Failed to read brand memory")
+            raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
         if not memory:
             raise HTTPException(status_code=404, detail=f"Brand memory for '{brand_id}' not found.")
         return memory
 
-    @app.put("/api/brand-memory")
+    @app.put("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])
     async def update_active_brand_memory(updates: Dict[str, Any]):
         try:
             return review_service.update_brand_memory(updates)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"Brand '{review_service.settings.brand_id}' not found.")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Storage error: {exc}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid brand memory update.")
+        except (OSError, RuntimeError):
+            log.exception("Failed to update active brand memory")
+            raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
-    @app.put("/api/brand-memory/{brand_id}")
+    @app.put("/api/brand-memory/{brand_id}", dependencies=[Depends(require_brand_memory_key)])
     async def update_brand_memory(brand_id: str, updates: Dict[str, Any]):
         try:
             return review_service.update_brand_memory(updates, brand_id=brand_id)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"Brand '{brand_id}' not found.")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Storage error: {exc}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid brand memory update.")
+        except (OSError, RuntimeError):
+            log.exception("Failed to update brand memory")
+            raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
-    @app.post("/api/brand-memory")
+    @app.post("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])
     async def create_or_save_brand_memory(memory: BrandMemory):
         try:
             review_service.save_brand_memory(memory)
             return {"status": "saved", "brand_id": memory.brand_id}
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Failed to persist brand memory: {exc}")
+        except (OSError, RuntimeError, ValueError):
+            log.exception("Failed to persist brand memory")
+            raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
     app.include_router(
         build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client),

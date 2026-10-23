@@ -112,10 +112,15 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5vl:3b
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+ENGANO_MEMORY_API_KEY=
+ENGANO_MEMORY_SOURCE=file
 ENGANO_POLICY_SOURCE=fixture
 REQUEST_TIMEOUT_SECONDS=30.0
 STRICT_MODE=false
 ```
+
+`SUPABASE_SECRET_KEY` is backend-only and is used for Supabase brand-memory persistence; never expose it through a `VITE_` variable or client bundle. `ENGANO_MEMORY_SOURCE` accepts `file` (default), `auto` (choose Supabase only when the secret key is configured), or `supabase` (fail explicitly if remote access is unconfigured). The brand-memory management API also requires the backend-only `ENGANO_MEMORY_API_KEY`.
 
 ---
 

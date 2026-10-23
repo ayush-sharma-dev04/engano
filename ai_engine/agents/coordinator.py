@@ -95,6 +95,7 @@ class CoordinatorAgent:
         agents_executed: List[str] = ["InputValidation"]
         fallback_occurred = False
         fallback_details = None
+        semantic_failure: Optional[Exception] = None
 
         # 1. Authoritative Policy Retrieval
         agents_executed.append("PolicyRetrieval")
@@ -220,6 +221,7 @@ class CoordinatorAgent:
                 all_raw_findings.extend(resp.findings)
                 provider_name = resp.provider_name
             except Exception as err:
+                semantic_failure = err
                 logger.warning("Semantic provider '%s' failed: %s", provider_name, err)
                 if self.config.safe_fallback:
                     fallback_occurred = True
@@ -229,7 +231,9 @@ class CoordinatorAgent:
                     )
                     provider_name = "rules_only_fallback"
                 else:
-                    all_raw_findings.append(self._create_failure_finding("SemanticProvider", err))
+                    logger.info(
+                        "Semantic provider failed without safe fallback; continuing with deterministic findings only."
+                    )
 
         # 5. Evidence Validation Agent
         agents_executed.append("EvidenceValidationAgent")
@@ -270,10 +274,19 @@ class CoordinatorAgent:
 
         duration_ms = (time.perf_counter() - start_time) * 1000
 
+        if semantic_failure is not None and not self.config.safe_fallback:
+            decision.status = ReviewDecision.RED
+            decision.action_required_by = ActionRequiredBy.REVIEWER_APPROVAL
+            decision.reason = (
+                f"Operational failure: Semantic review provider '{provider_name}' failed "
+                f"({type(semantic_failure).__name__}). AI review did not complete; "
+                "deterministic findings were retained without fabricating a content finding."
+            )
+
         return ReviewResult(
             draft_id=payload.draft_id,
             brand_id=payload.brand_id,
-            completion_status="completed",
+            completion_status="operational_failure" if (semantic_failure is not None and not self.config.safe_fallback) else "completed",
             decision=decision,
             findings=unique_findings,
             proposed_rewrite=rewrite_proposal.proposed_text,

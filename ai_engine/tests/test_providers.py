@@ -92,14 +92,14 @@ def test_gemini_high_demand_retries_fallback(nimbus_policy: BrandPolicy):
     ]
 
     provider = GeminiProvider(
-        config=EngineConfig(AI_PROVIDER="gemini", GEMINI_API_KEY="test-mock-key", GEMINI_MODEL="gemini-flash-lite-latest"),
+        config=EngineConfig(AI_PROVIDER="gemini", GEMINI_API_KEY="test-mock-key", GEMINI_MODEL="gemini-3.1-flash-lite"),
         client=mock_client,
     )
     resp = provider.review("sample text", nimbus_policy, [])
     assert resp.provider_name == "gemini"
     assert resp.findings == []
     assert mock_client.models.generate_content.call_count == 2
-    assert mock_client.models.generate_content.call_args_list[1].kwargs["model"] == "gemini-3.1-flash-lite"
+    assert mock_client.models.generate_content.call_args_list[1].kwargs["model"] == "gemini-3.8-flash"
 
 
 def test_ollama_connection_error_handling(nimbus_policy: BrandPolicy):

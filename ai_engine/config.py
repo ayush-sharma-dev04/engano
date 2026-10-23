@@ -22,7 +22,8 @@ class EngineConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
+        populate_by_name=True,
     )
 
     # Provider Selection
@@ -65,8 +66,20 @@ class EngineConfig(BaseSettings):
     memory_source: str = Field(
         default="file",
         alias="ENGANO_MEMORY_SOURCE",
-        description="Brand memory persistence source: 'file' (default) or 'supabase'"
+        description="Brand memory persistence source: 'file' (default safe local behavior), 'auto' (Supabase when configured), or 'supabase'"
     )
+
+    @field_validator("memory_source", mode="before")
+    @classmethod
+    def validate_memory_source(cls, v: object) -> str:
+        if isinstance(v, str):
+            clean_v = v.strip().lower()
+            if clean_v not in {"auto", "file", "supabase"}:
+                raise ValueError(
+                    "Invalid ENGANO_MEMORY_SOURCE. Must be one of: auto, file, supabase"
+                )
+            return clean_v
+        return v  # type: ignore
 
     # Supabase Configuration
     supabase_url: Optional[str] = Field(
@@ -78,6 +91,16 @@ class EngineConfig(BaseSettings):
         default=None,
         alias="SUPABASE_PUBLISHABLE_KEY",
         description="Supabase public/anon API key"
+    )
+    supabase_secret_key: Optional[SecretStr] = Field(
+        default=None,
+        alias="SUPABASE_SECRET_KEY",
+        description="Backend-only Supabase secret key for privileged brand-memory access"
+    )
+    brand_memory_api_key: Optional[SecretStr] = Field(
+        default=None,
+        alias="ENGANO_MEMORY_API_KEY",
+        description="Backend-only key required by brand-memory management API endpoints"
     )
 
     # Execution and Review Parameters

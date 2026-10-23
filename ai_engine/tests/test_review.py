@@ -122,3 +122,26 @@ def test_operational_failure_handling():
     assert result.completion_status == "operational_failure"
     assert result.decision.status == ReviewDecision.RED
     assert "Operational failure" in result.decision.reason
+
+
+def test_semantic_provider_failure_is_operational_not_fake_finding(mock_repo: MockPolicyRepository):
+    failing_provider = MagicMock()
+    failing_provider.provider_name = "gemini"
+    failing_provider.review.side_effect = RuntimeError("Temporary model outage")
+
+    req = ReviewInput(
+        draft_id="draft_model_failure",
+        brand_id="nimbus_cloud",
+        content_text="Nimbus DB is the fastest database in the world.",
+    )
+    result = run_brand_review(
+        request=req,
+        repository=mock_repo,
+        config=EngineConfig(AI_PROVIDER="gemini"),
+        provider=failing_provider,
+    )
+
+    assert result.completion_status == "operational_failure"
+    assert result.decision.status == ReviewDecision.RED
+    assert "Operational failure" in result.decision.reason
+    assert all("Temporary model outage" not in f.explanation for f in result.findings)
