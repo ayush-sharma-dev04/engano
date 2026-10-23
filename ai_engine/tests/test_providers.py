@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 import httpx
 import pytest
+from google.genai import errors as genai_errors
 from ai_engine.config import EngineConfig, ProviderType
 from ai_engine.providers.factory import RulesOnlyProvider, get_provider
 from ai_engine.providers.gemini import GeminiProvider
@@ -77,6 +78,28 @@ def test_gemini_malformed_json_fallback(nimbus_policy: BrandPolicy):
     resp = provider.review("sample text", nimbus_policy, [])
     # Should safely return empty semantic findings without crashing
     assert resp.findings == []
+
+
+def test_gemini_high_demand_retries_fallback(nimbus_policy: BrandPolicy):
+    mock_client = MagicMock()
+    primary_error = genai_errors.APIError(
+        503,
+        {"error": {"message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."}},
+    )
+    mock_client.models.generate_content.side_effect = [
+        primary_error,
+        MagicMock(text=json.dumps({"findings": []})),
+    ]
+
+    provider = GeminiProvider(
+        config=EngineConfig(AI_PROVIDER="gemini", GEMINI_API_KEY="test-mock-key", GEMINI_MODEL="gemini-flash-lite-latest"),
+        client=mock_client,
+    )
+    resp = provider.review("sample text", nimbus_policy, [])
+    assert resp.provider_name == "gemini"
+    assert resp.findings == []
+    assert mock_client.models.generate_content.call_count == 2
+    assert mock_client.models.generate_content.call_args_list[1].kwargs["model"] == "gemini-3.1-flash-lite"
 
 
 def test_ollama_connection_error_handling(nimbus_policy: BrandPolicy):

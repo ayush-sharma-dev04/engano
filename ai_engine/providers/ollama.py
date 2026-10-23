@@ -34,6 +34,8 @@ def _load_prompt_template() -> str:
 class OllamaProvider(BaseProvider):
     """Semantic review provider using local Ollama model."""
 
+    provider_name: str = "ollama"
+
     def __init__(
         self,
         config: Optional[EngineConfig] = None,

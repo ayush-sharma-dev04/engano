@@ -1,5 +1,6 @@
 """Engine schemas package."""
 
+from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.brand_policy import (
     AccessibilityRules,
     ApprovedTerm,
@@ -18,6 +19,11 @@ from ai_engine.schemas.findings import (
     FindingSeverity,
     TextSpan,
 )
+from ai_engine.schemas.payload import (
+    ChannelType,
+    DraftPayload,
+    ImageItem,
+)
 from ai_engine.schemas.review import (
     ActionRequiredBy,
     DecisionOutcome,
@@ -32,14 +38,18 @@ __all__ = [
     "AccessibilityRules",
     "ActionRequiredBy",
     "ApprovedTerm",
+    "BrandMemory",
     "BrandPolicy",
+    "ChannelType",
     "ClaimsPolicy",
     "DecisionOutcome",
+    "DraftPayload",
     "EvidenceStatus",
     "FactualRule",
     "Finding",
     "FindingCategory",
     "FindingSeverity",
+    "ImageItem",
     "LegalRule",
     "OfferRule",
     "PermittedBenchmark",

@@ -24,6 +24,8 @@ from ai_engine.schemas.findings import (
 )
 
 logger = logging.getLogger(__name__)
+PRIMARY_GEMINI_MODEL = "gemini-flash-lite-latest"
+FALLBACK_GEMINI_MODEL = "gemini-3.1-flash-lite"
 
 
 def _load_prompt_template() -> str:
@@ -35,6 +37,8 @@ def _load_prompt_template() -> str:
 
 class GeminiProvider(BaseProvider):
     """Semantic review provider using Google Gemini."""
+
+    provider_name: str = "gemini"
 
     def __init__(self, config: Optional[EngineConfig] = None, client: Optional[Any] = None) -> None:
         self.config = config or get_engine_config()
@@ -80,8 +84,40 @@ class GeminiProvider(BaseProvider):
             )
             raw_text = response.text if hasattr(response, "text") else str(response)
         except genai_errors.APIError as exc:
-            logger.error("Gemini API Error occurred during review: %s", exc.message)
-            raise RuntimeError(f"Gemini API Error: {exc.message}") from None
+            err_msg = exc.message or str(exc)
+            transient_error = (
+                "503" in err_msg
+                or "429" in err_msg
+                or "rate limit" in err_msg.lower()
+                or "too many requests" in err_msg.lower()
+                or "high demand" in err_msg.lower()
+                or "spikes in demand" in err_msg.lower()
+                or "temporarily unavailable" in err_msg.lower()
+                or "UNAVAILABLE" in err_msg.upper()
+                or "404" in err_msg
+                or "not found" in err_msg.lower()
+            )
+            # Retry only for transient capacity or model-availability failures. Permanent
+            # auth/configuration issues should fail closed without looping.
+            if transient_error and self.model != FALLBACK_GEMINI_MODEL:
+                logger.warning(
+                    "Primary Gemini model '%s' returned %s. Retrying with fallback model '%s'...",
+                    self.model,
+                    err_msg,
+                    FALLBACK_GEMINI_MODEL,
+                )
+                try:
+                    response = self._client.models.generate_content(
+                        model=FALLBACK_GEMINI_MODEL,
+                        contents=prompt,
+                    )
+                    raw_text = response.text if hasattr(response, "text") else str(response)
+                except Exception as inner_exc:
+                    logger.error("Gemini fallback model also failed: %s", inner_exc)
+                    raise RuntimeError(f"Gemini API Error: {err_msg}") from None
+            else:
+                logger.error("Gemini API Error occurred during review: %s", err_msg)
+                raise RuntimeError(f"Gemini API Error: {err_msg}") from None
         except Exception as exc:
             logger.error("Gemini client error: %s", type(exc).__name__)
             raise RuntimeError(f"Gemini provider execution failed: {type(exc).__name__}") from None

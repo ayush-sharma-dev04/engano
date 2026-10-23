@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 from ai_engine import run_brand_review
 from ai_engine.integrations import (
@@ -11,6 +12,12 @@ from ai_engine.integrations import (
     MockPolicyRepository,
     SupabasePolicyRepository,
 )
+from ai_engine.memory.store import (
+    BaseBrandMemoryStore,
+    get_brand_memory_store,
+)
+from ai_engine.schemas.brand_memory import BrandMemory
+from ai_engine.schemas.payload import DraftPayload
 from ai_engine.schemas.review import ReviewInput, ReviewResult
 
 from .env import REPO_ROOT, ROOT_ENV
@@ -54,11 +61,37 @@ def make_repository(settings: ReviewSettings) -> BasePolicyRepository:
 
 
 class ReviewService:
-    def __init__(self, settings: ReviewSettings, repository: BasePolicyRepository | None = None):
+    def __init__(
+        self,
+        settings: ReviewSettings,
+        repository: BasePolicyRepository | None = None,
+        memory_store: BaseBrandMemoryStore | None = None,
+    ):
         self.settings = settings
         self.repository = repository or make_repository(settings)
+        self.memory_store = memory_store or get_brand_memory_store()
+
+    def get_brand_memory(self, brand_id: Optional[str] = None) -> Optional[BrandMemory]:
+        """Retrieve persistent brand memory for specified or default brand."""
+        target_id = brand_id or self.settings.brand_id
+        return self.memory_store.get_memory(target_id)
+
+    def save_brand_memory(self, memory: BrandMemory) -> None:
+        """Persist brand memory record."""
+        self.memory_store.save_memory(memory)
+
+    def update_brand_memory(self, updates: Dict[str, Any], brand_id: Optional[str] = None) -> BrandMemory:
+        """Update explicit brand memory preferences."""
+        target_id = brand_id or self.settings.brand_id
+        return self.memory_store.update_preferences(target_id, updates)
 
     async def review_text(self, draft_id: str, text: str) -> ReviewResult:
         request = ReviewInput(draft_id=draft_id, brand_id=self.settings.brand_id, content_text=text)
+        memory = self.get_brand_memory(self.settings.brand_id)
         # run_brand_review is synchronous (and may call an LLM), so keep it off the event loop.
-        return await asyncio.to_thread(run_brand_review, request, self.repository)
+        return await asyncio.to_thread(run_brand_review, request, self.repository, None, None, memory)
+
+    async def review_payload(self, payload: DraftPayload) -> ReviewResult:
+        """Execute review directly on a normalized DraftPayload."""
+        memory = self.get_brand_memory(payload.brand_id)
+        return await asyncio.to_thread(run_brand_review, payload, self.repository, None, None, memory)

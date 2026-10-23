@@ -1,0 +1,24 @@
+{
+  "brand_id": "nimbus_cloud",
+  "brand_name": "Nimbus Cloud",
+  "description": "Fictional cloud database brand policy for offline testing and benchmarks.",
+  "voice_and_tone_preferences": [
+    "confident",
+    "professional",
+    "clear"
+  ],
+  "target_audience": "Cloud engineers and database architects",
+  "approved_terminology": [
+    "Nimbus DB"
+  ],
+  "verified_facts": [
+    "Nimbus Cloud guarantees 99.95% monthly uptime SLA.",
+    "Single-digit millisecond reads under Benchmark B-4 test parameters."
+  ],
+  "custom_preferences": {
+    "strict_slas": true
+  },
+  "policy_reference": "data/brand_library/nimbus_db.json",
+  "updated_at": "2026-10-23T12:00:00Z",
+  "version": 1
+}

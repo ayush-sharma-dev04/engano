@@ -21,6 +21,8 @@ class ProviderResponse(BaseModel):
 class BaseProvider(ABC):
     """Abstract base class for all review providers."""
 
+    provider_name: str = "base"
+
     @abstractmethod
     def review(
         self,

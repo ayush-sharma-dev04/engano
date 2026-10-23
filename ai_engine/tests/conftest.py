@@ -1,10 +1,16 @@
 """Shared pytest fixtures for offline test suite."""
 
 import json
+import os
 from pathlib import Path
 import pytest
+from ai_engine.config import get_engine_config
 from ai_engine.integrations.supabase_policy_repository import MockPolicyRepository
 from ai_engine.schemas.brand_policy import BrandPolicy
+
+# Default unit tests to rules_only unless a test explicitly configures another provider
+os.environ.setdefault("AI_PROVIDER", "rules_only")
+get_engine_config.cache_clear()
 
 
 @pytest.fixture(scope="session")

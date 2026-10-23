@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 class RulesOnlyProvider(BaseProvider):
     """Deterministic-only provider that performs no LLM or network operations."""
 
+    provider_name: str = "rules_only"
+
     def review(
         self,
         content_text: str,

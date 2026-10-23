@@ -1,27 +1,46 @@
-# Engano AI/ML Review Engine
+# Engano AI/ML Review Engine — 4-Stage Multi-Agent Architecture
 
-The Engano AI/ML Review Engine provides brand governance and copy review for marketing and product drafts in Web Studio. It pairs deterministic Python rules with semantic LLM evaluation (Google Gemini and local Ollama) in a bounded, multi-agent pipeline.
+The Engano AI/ML Review Engine provides brand governance and copy review across multiple channels (Web Studio, Discord, WhatsApp, Gmail, LinkedIn). It pairs deterministic Python rules with specialized domain agents in a bounded 4-stage multi-agent pipeline.
 
 ---
 
-## 1. Engine Architecture
+## 1. Complete Four-Stage Multi-Agent Pipeline
 
-```
-[Web Studio / FastAPI Backend]
-               │
-               ▼
-   run_brand_review(request)
-               │
-               ▼
-     [Review Orchestrator]
-       ├── 1. Authoritative Policy Retrieval (Supabase / Mock Repository)
-       ├── 2. Policy Analysis Agent (Scope & applicability mapping)
-       ├── 3. Deterministic Evaluator (Terminology, Claims, Factual, WCAG)
-       ├── 4. Semantic Provider (Rules-Only / Ollama qwen2.5vl:3b / Gemini)
-       ├── 5. Evidence Validation Agent (Verified, Unsupported, Contradicted)
-       ├── 6. Finding Consolidation & Text Span Verification
-       ├── 7. Decision Router (RED > YELLOW > GREEN with Strict Mode)
-       └── 8. Safe Rewrite Agent (Minimal, non-hallucinating corrections)
+```text
+Raw Channel Input (Web Studio, Discord, WhatsApp, Gmail, LinkedIn)
+                        │
+                        ▼
+        STAGE 1: Adapter Layer (`ai_engine/adapters/`)
+        Validate & normalize inputs into canonical `DraftPayload`
+                        │
+                        ▼
+        STAGE 2: Coordinator Agent (`ai_engine/agents/coordinator.py`)
+        Resolve BrandLibrary, select specialists based on payload contents
+                        │
+                        ▼
+        STAGE 3: Specialist Agents (`ai_engine/agents/specialists/`)
+        ├── Rules Specialist (Deterministic: terminology, casing, variants)
+        ├── Tone Specialist (Brand voice, tone mismatch)
+        ├── Claims Specialist (Superlatives, SLA facts, retired offers)
+        ├── Visual & WCAG Specialist (Contrast, alt-text, logo margins)
+        └── Legal & Policy Specialist (Disclaimers, trademarks, restricted claims)
+        (Execute concurrently where safe; fail-closed on critical error)
+                        │
+                        ▼
+        Finding Aggregation & Span Alignment (`ai_engine/agents/aggregator.py`)
+        Deduplication, span revalidation against original draft, evidence classification
+                        │
+                        ▼
+        STAGE 4: Decision Agent (`ai_engine/agents/decision.py`)
+        Precedence evaluation: RED > YELLOW > GREEN; Strict Mode enforcement
+                        │
+                        +------> Rewrite Agent (`ai_engine/agents/rewrite.py`)
+                        │        Generate safe minimal fix + POST-REWRITE REVALIDATION
+                        ▼
+        Validated `ReviewResult`
+                        │
+                        ▼
+        Channel-specific rendering (Discord embeds, WhatsApp text, Web Studio API)
 ```
 
 ### Deterministic vs. Semantic Synergy
@@ -61,7 +80,7 @@ The Engano AI/ML Review Engine provides brand governance and copy review for mar
 
 - `rules_only` (Default / Offline): Executes deterministic evaluators only. Never initiates outbound HTTP requests or accesses LLMs.
 - `ollama`: Invokes the local Ollama instance (`http://localhost:11434`) running `qwen2.5vl:3b`. Local only; no cloud transmission.
-- `gemini`: Uses Google Gemini (via `google-genai` SDK) with configurable model (`gemini-2.5-flash`). Requires `GEMINI_API_KEY`.
+- `gemini`: Uses Google Gemini (via `google-genai` SDK) with the verified primary model `gemini-flash-lite-latest` and a fallback to `gemini-3.1-flash-lite`. Requires `GEMINI_API_KEY` and safely retries only for transient 404/503/high-demand failures.
 - `auto`: Intelligently detects whether local Ollama is active; falls back to Gemini if configured, or rules-only if offline.
 
 ---
@@ -86,13 +105,14 @@ cp .env.example .env
 ```
 Example `.env`:
 ```dotenv
-AI_PROVIDER=rules_only
+AI_PROVIDER=gemini
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-flash-lite-latest
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5vl:3b
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
+ENGANO_POLICY_SOURCE=fixture
 REQUEST_TIMEOUT_SECONDS=30.0
 STRICT_MODE=false
 ```

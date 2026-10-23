@@ -44,6 +44,9 @@ class MockPolicyRepository(BasePolicyRepository):
         """Register a test fixture policy."""
         self._policies[policy.brand_id] = policy
 
+    # Alias for convenience in tests
+    save_policy = register_policy
+
     def load_fixture(self, fixture_path: str | Path) -> BrandPolicy:
         """Load and register a JSON fixture file (such as nimbus_db.json)."""
         path = Path(fixture_path)

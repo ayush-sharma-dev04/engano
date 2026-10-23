@@ -2,12 +2,21 @@
 
 Proposes minimal, safe copy corrections that resolve brand violations
 without fabricating new claims, statistics, or certifications.
+Performs post-rewrite revalidation against deterministic rules and policy checks.
+STRICT CONTRACT: A proposed rewrite never overrides or bypasses an underlying RED decision.
 """
 
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from ai_engine.agents.specialists.legal_policy_specialist import LegalPolicySpecialist
+from ai_engine.agents.specialists.tone_specialist import ToneSpecialist
+from ai_engine.rules.claims import evaluate_claims
+from ai_engine.rules.factual import evaluate_factual
+from ai_engine.rules.terminology import evaluate_terminology
 from ai_engine.schemas.brand_policy import BrandPolicy
-from ai_engine.schemas.findings import Finding, FindingCategory
+from ai_engine.schemas.findings import Finding, FindingCategory, FindingSeverity
+from ai_engine.schemas.payload import DraftPayload
+from ai_engine.schemas.review import ReviewDecision
 
 
 class RewriteProposal(BaseModel):
@@ -16,6 +25,13 @@ class RewriteProposal(BaseModel):
     applied_fixes: List[str] = Field(default_factory=list)
     requires_clarification: bool = False
     clarification_question: Optional[str] = None
+    original_findings: List[Finding] = Field(default_factory=list)
+    unresolved_findings: List[Finding] = Field(default_factory=list)
+    new_findings: List[Finding] = Field(default_factory=list)
+    is_post_revalidation_passed: bool = True
+    post_revalidation_decision: Optional[ReviewDecision] = None
+    revalidation_error: Optional[str] = None
+    explanation: Optional[str] = None
 
 
 class RewriteAgent:
@@ -27,24 +43,52 @@ class RewriteAgent:
         findings: List[Finding],
         policy: BrandPolicy,
     ) -> RewriteProposal:
-        """Generate a minimal safe rewrite resolving identified findings."""
+        """Generate a minimal safe rewrite and revalidate it against policy checks."""
+        # 1. Clean draft needs no rewrite
         if not findings:
-            return RewriteProposal(proposed_text=content_text, applied_fixes=[])
+            return RewriteProposal(
+                proposed_text=None,
+                applied_fixes=[],
+                original_findings=[],
+                unresolved_findings=[],
+                new_findings=[],
+                is_post_revalidation_passed=True,
+                post_revalidation_decision=ReviewDecision.GREEN,
+                explanation="Draft is compliant; no rewrite required.",
+            )
 
-        # Sort findings in reverse text order to preserve span indices during string replacement
+        # 2. Identify replaceable findings with concrete suggested fixes and valid spans
         replaceable_findings = [
             f for f in findings
             if f.suggested_fix and f.text_span.end > f.text_span.start
         ]
 
+        # 3. Identify unfixable critical findings that require manual creator or reviewer action
+        unfixable = [
+            f for f in findings
+            if not f.suggested_fix
+            or f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH)
+            or f.category in (FindingCategory.LEGAL, FindingCategory.OUTDATED_OFFER)
+        ]
+
+        # If no findings can be safely and mechanically repaired
         if not replaceable_findings:
-            # If violations cannot be deterministically repaired safely
             return RewriteProposal(
                 proposed_text=None,
+                applied_fixes=[],
+                original_findings=findings,
                 requires_clarification=True,
-                clarification_question="Content has policy violations requiring creator rephrasing.",
+                clarification_question="Content has high-risk policy violations requiring creator or reviewer revision.",
+                unresolved_findings=findings,
+                new_findings=[],
+                is_post_revalidation_passed=False,
+                post_revalidation_decision=ReviewDecision.RED if any(
+                    f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH) for f in findings
+                ) else ReviewDecision.YELLOW,
+                explanation="Draft contains unfixable policy violations; safe automatic rewrite cannot be generated.",
             )
 
+        # Sort reverse text order to preserve character offsets during replacements
         replaceable_findings.sort(key=lambda x: x.text_span.start, reverse=True)
 
         current_text = content_text
@@ -55,25 +99,76 @@ class RewriteAgent:
             end = f.text_span.end
             fix = f.suggested_fix
 
+            # Ensure exact slice matches to avoid corrupted replacements
             if fix and current_text[start:end] == f.highlighted_text:
+                # Do not substitute meta-instructions as literal draft copy
+                if any(fix.lower().startswith(p) for p in ("rephrase", "remove or replace", "replace with", "check", "contact")):
+                    continue
                 current_text = current_text[:start] + fix + current_text[end:]
                 applied_fixes.append(
                     f"Replaced '{f.highlighted_text}' with '{fix}' ({f.category.value})"
                 )
 
-        # Check if any critical unfixable issues remain
-        unfixable = [f for f in findings if not f.suggested_fix and f.category == FindingCategory.LEGAL]
+        # 4. Post-Rewrite Revalidation across all specialist rule domains
+        reval_error: Optional[str] = None
+        remaining: List[Finding] = []
+        try:
+            reval_payload = DraftPayload(draft_id="post_rewrite_reval", content_text=current_text, brand_id=policy.brand_id)
+            post_term = evaluate_terminology(current_text, policy)
+            post_claims = evaluate_claims(current_text, policy)
+            post_facts = evaluate_factual(current_text, policy)
+            post_tone = ToneSpecialist().evaluate(reval_payload, policy)
+            post_legal = LegalPolicySpecialist().evaluate(reval_payload, policy)
+            remaining = post_term + post_claims + post_facts + post_tone + post_legal
+        except Exception as exc:
+            reval_error = f"Revalidation failed ({type(exc).__name__}: {exc})"
+
+        # Distinguish between original unresolved findings and new findings introduced by rewrite
+        original_keys = {(f.category, f.highlighted_text) for f in findings}
+        new_findings = [
+            f for f in remaining
+            if (f.category, f.highlighted_text) not in original_keys
+        ]
+        unresolved_findings = [
+            f for f in remaining
+            if f not in new_findings
+        ]
+
+        is_passed = (len(remaining) == 0) and (reval_error is None)
+
+        # Calculate post-revalidation decision
+        if any(f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH) for f in remaining):
+            post_decision = ReviewDecision.RED
+        elif any(f.severity == FindingSeverity.MEDIUM for f in remaining):
+            post_decision = ReviewDecision.YELLOW
+        else:
+            post_decision = ReviewDecision.GREEN
+
+        requires_clarification = bool(unfixable) or bool(new_findings)
+        clarification_q = None
         if unfixable:
-            return RewriteProposal(
-                proposed_text=current_text,
-                applied_fixes=applied_fixes,
-                requires_clarification=True,
-                clarification_question="Legal constraints detected that require manual author review.",
+            clarification_q = (
+                "Rewritten copy addresses mechanical fixes, but remaining high-risk claims "
+                "require reviewer approval."
+            )
+        elif new_findings:
+            clarification_q = (
+                "Proposed rewrite introduced secondary policy findings; human review required."
             )
 
         return RewriteProposal(
             proposed_text=current_text,
             applied_fixes=applied_fixes,
-            requires_clarification=False,
-            clarification_question=None,
+            requires_clarification=requires_clarification,
+            clarification_question=clarification_q,
+            original_findings=findings,
+            unresolved_findings=unresolved_findings,
+            new_findings=new_findings,
+            is_post_revalidation_passed=is_passed,
+            post_revalidation_decision=post_decision,
+            revalidation_error=reval_error,
+            explanation=(
+                f"Applied {len(applied_fixes)} fix(es). "
+                f"Post-revalidation {'passed cleanly' if is_passed else f'flagged {len(remaining)} item(s)'}."
+            ),
         )

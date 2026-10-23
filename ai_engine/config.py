@@ -39,7 +39,7 @@ class EngineConfig(BaseSettings):
         description="Google Gemini API Key"
     )
     gemini_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-flash-lite-latest",
         alias="GEMINI_MODEL",
         description="Google Gemini model identifier"
     )
@@ -54,6 +54,18 @@ class EngineConfig(BaseSettings):
         default="qwen2.5vl:3b",
         alias="OLLAMA_MODEL",
         description="Model identifier running in local Ollama instance"
+    )
+
+    # Brand Memory Configuration
+    memory_storage_dir: str = Field(
+        default="data/brand_memory",
+        alias="ENGANO_MEMORY_DIR",
+        description="Filesystem directory for persistent brand memory"
+    )
+    memory_source: str = Field(
+        default="file",
+        alias="ENGANO_MEMORY_SOURCE",
+        description="Brand memory persistence source: 'file' (default) or 'supabase'"
     )
 
     # Supabase Configuration
