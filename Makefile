@@ -13,7 +13,7 @@ OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen
 OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: help pull setup migrate migrate-status start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
+.PHONY: help pull setup migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ migrate: setup ## Apply new supabase/migrations/*.sql to the database (needs SUP
 
 migrate-status: setup ## Show which migrations are applied and which are pending
 	$(PY) supabase/migrate.py --status
+
+seed: setup ## Load brand rules from data/brand_library/*.json into the database (APPLY=1 to write; default is a dry run)
+	$(PY) supabase/seed.py $(if $(APPLY),--apply)
 
 start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Discord, Gmail, tunnel + webhook (Ctrl+C stops all)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' INT TERM; \

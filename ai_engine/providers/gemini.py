@@ -73,7 +73,7 @@ class GeminiProvider(BaseProvider):
         start_time = time.perf_counter()
 
         # Build prompt payload
-        policy_summary = policy.model_dump_json(exclude_none=True)
+        policy_summary = policy.model_dump_json(exclude_none=True, exclude={"test_fixtures"})
         findings_summary = json.dumps([f.model_dump() for f in deterministic_findings])
 
         prompt = (

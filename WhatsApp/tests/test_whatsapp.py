@@ -108,7 +108,10 @@ def test_reviews_text_and_replies(client, fake):
 
 
 def test_clean_draft_is_green_without_rewrite(client, fake):
-    signed_post(client, text_message("wamid.3", "Nimbus DB keeps your data safe with a 99.95% uptime SLA."))
+    signed_post(
+        client,
+        text_message("wamid.3", "Nimbus DB keeps your data safe with a 99.95% uptime SLA. Terms and conditions apply to service SLA."),
+    )
     text = fake.sent[0]["text"]
     assert "Ready to publish" in text
     assert "Suggested rewrite" not in text

@@ -13,6 +13,7 @@ from collections import OrderedDict
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from engano_backend.escalation import EscalationSettings, escalation_for, reviewer_message
 from engano_backend.review_service import ReviewService
 from .client import WhatsAppClient
 from .config import WhatsAppSettings
@@ -49,12 +50,32 @@ def build_router(
     review_service: ReviewService,
     settings: WhatsAppSettings,
     client: WhatsAppClient,
+    escalation: EscalationSettings | None = None,
 ) -> APIRouter:
+    escalation = escalation or EscalationSettings()
     router = APIRouter(tags=["whatsapp"])
     recent = _RecentIds()
 
     async def reply(msg: IncomingMessage, text: str) -> None:
         await client.send_text(msg.phone_number_id, msg.sender, text, reply_to=msg.message_id)
+
+    async def escalate(msg: IncomingMessage, result) -> str:
+        """Hand an unsure review to the human reviewer. Returns a note for the sender, or ''."""
+        reviewer = escalation.whatsapp_number
+        needed, reasons = escalation_for(result)
+        if not reviewer or not needed or msg.sender == reviewer:
+            return ""
+        try:
+            await client.send_text(
+                msg.phone_number_id,
+                reviewer,
+                reviewer_message(result, msg.text, "WhatsApp", f"+{msg.sender}", reasons),
+            )
+        except Exception as exc:
+            log.error("Couldn't send review %s to the reviewer: %s", result.draft_id, exc)
+            return "\n\n_I couldn't reach the reviewer automatically. Please contact them directly._"
+        log.info("Review %s escalated to the reviewer", result.draft_id)
+        return "\n\n_Sent to a reviewer for approval._"
 
     async def handle(msg: IncomingMessage) -> None:
         try:
@@ -82,7 +103,9 @@ def build_router(
                 "Review %s: %s (%s, %d findings)",
                 draft_id, result.decision.status.value, result.completion_status, len(result.findings),
             )
-            await reply(msg, render_result(result, msg.text, had_image=msg.has_image))
+            text = render_result(result, msg.text, had_image=msg.has_image)
+            note = await escalate(msg, result)
+            await reply(msg, text + note if note else text)
         except Exception:
             log.exception("Couldn't handle WhatsApp message %s", msg.message_id)
 

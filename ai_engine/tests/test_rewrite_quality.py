@@ -34,3 +34,30 @@ def test_rewrite_never_clears_a_red_decision(review):
     result = review("NimbusDB has 100% uptime. Try it free forever.")
     assert result.decision.status.value == "RED"
     assert result.post_rewrite_findings
+
+
+def test_sla_claim_without_disclaimer_gets_one_click_disclaimer(review):
+    result = review("Nimbus DB keeps your data safe with a 99.95% uptime SLA.")
+    assert result.decision.status.value == "GREEN"
+    assert result.decision.action_required_by.value == "creator_one_click"
+    assert result.proposed_rewrite == (
+        "Nimbus DB keeps your data safe with a 99.95% uptime SLA. Terms and conditions apply to service SLA."
+    )
+    assert not result.post_rewrite_findings
+
+
+def test_sla_claim_with_disclaimer_is_clean(review):
+    result = review("Nimbus DB has a 99.95% uptime SLA. Terms and conditions apply to service SLA.")
+    assert result.decision.status.value == "GREEN" and not result.findings
+
+
+def test_absolute_sla_promise_is_still_red_and_rewrite_keeps_the_draft(review):
+    result = review("Nimbus DB has a guaranteed SLA.")
+    assert result.decision.status.value == "RED"
+    assert (result.proposed_rewrite or "").startswith("Nimbus DB has a guaranteed SLA")
+
+
+def test_data_driven_tone_phrases_and_restricted_claims(review):
+    result = review("Act now! Nimbus DB is fully compliant, just trust us.")
+    texts = {f.highlighted_text.lower() for f in result.findings}
+    assert {"act now", "just trust us", "fully compliant"} <= texts

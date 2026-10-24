@@ -20,6 +20,7 @@ from engano_whatsapp.client import WhatsAppClient
 from engano_whatsapp.config import WhatsAppSettings
 from engano_whatsapp.router import build_router as build_whatsapp_router
 
+from .escalation import EscalationSettings
 from .review_service import ReviewService, ReviewSettings
 
 log = logging.getLogger("engano.backend")
@@ -47,7 +48,9 @@ def create_app(
     linkedin_client: LinkedInClient | None = None,
     linkedin_store: TokenStore | None = None,
     engine_config: EngineConfig | None = None,
+    escalation: EscalationSettings | None = None,
 ) -> FastAPI:
+    escalation = escalation or EscalationSettings.from_env()
     review_service = review_service or ReviewService(ReviewSettings.from_env())
 
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()
@@ -174,7 +177,7 @@ def create_app(
             raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
     app.include_router(
-        build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client),
+        build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client, escalation),
         prefix="/api/webhooks/whatsapp",
     )
     app.include_router(build_linkedin_router(review_service, linkedin_settings, linkedin_client, linkedin_store))

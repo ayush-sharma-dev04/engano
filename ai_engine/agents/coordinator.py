@@ -240,7 +240,7 @@ class CoordinatorAgent:
                     images=payload.images,
                     **review_kwargs,
                 )
-                all_raw_findings.extend(resp.findings)
+                all_raw_findings.extend(self._vet_provider_findings(resp.findings, payload.content_text, policy))
                 provider_name = resp.provider_name
             except Exception as err:
                 semantic_failure = err
@@ -326,6 +326,37 @@ class CoordinatorAgent:
                 policy_source=policy_source,
             ),
         )
+
+    @staticmethod
+    def _policy_rule_ids(policy: BrandPolicy) -> List[str]:
+        ids = [t.term_id for t in policy.approved_terminology]
+        ids += [policy.claims_policy.rule_reference]
+        ids += [r.rule_id for r in policy.factual_rules] + [o.offer_id for o in policy.offers]
+        ids += [r.rule_id for r in policy.tone_rules] + [r.rule_id for r in policy.legal_rules]
+        return [i.lower() for i in ids if i]
+
+    @classmethod
+    def _vet_provider_findings(cls, findings: List[Finding], draft: str, policy: BrandPolicy) -> List[Finding]:
+        """Keep the LLM advisory. A provider finding survives only if it (1) quotes text that
+        is really in the draft and (2) cites a rule that exists in the brand policy. Survivors
+        are capped at MEDIUM with human review required, so a model alone can never push a
+        draft to RED. The policy rules decide that."""
+        norm = " ".join(draft.lower().split())
+        known = cls._policy_rule_ids(policy)
+        kept: List[Finding] = []
+        for f in findings:
+            quoted = " ".join(f.highlighted_text.lower().split())
+            if quoted and quoted not in norm:
+                logger.warning("Dropped ungrounded provider finding (quote not in draft): %.60r", f.highlighted_text)
+                continue
+            cited = (f.cited_source or "").lower()
+            if not any(rule_id in cited for rule_id in known):
+                logger.warning("Dropped provider finding citing no policy rule: %.60r (cited %r)", f.highlighted_text, f.cited_source)
+                continue
+            if f.severity in (FindingSeverity.HIGH, FindingSeverity.CRITICAL):
+                f = f.model_copy(update={"severity": FindingSeverity.MEDIUM})
+            kept.append(f.model_copy(update={"human_review_required": True}))
+        return kept
 
     def _retrieve_context(self, payload: DraftPayload) -> List[str]:
         """Advisory retrieved context; any failure just means no extra context."""

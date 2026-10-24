@@ -3,6 +3,7 @@ import logging
 import discord
 from discord import app_commands
 
+from engano_backend.escalation import EscalationSettings, escalation_for, reviewer_message
 from engano_backend.review_service import ReviewService, ReviewSettings
 
 from .config import Settings, load_settings
@@ -18,6 +19,7 @@ class EnganoBot(discord.Client):
         super().__init__(intents=discord.Intents.default())
         self.settings = settings
         self.reviews = ReviewService(ReviewSettings.from_env())
+        self.escalation = EscalationSettings.from_env()
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
@@ -31,6 +33,19 @@ class EnganoBot(discord.Client):
         else:
             synced = await self.tree.sync()
             log.info("Synced %d global commands", len(synced))
+
+    async def send_to_reviewer(self, text: str, embed: discord.Embed | None = None) -> bool:
+        """DM the human reviewer. False (and a log line) if they can't be reached."""
+        reviewer_id = self.escalation.discord_user_id
+        if not reviewer_id:
+            return False
+        try:
+            user = await self.fetch_user(reviewer_id)
+            await user.send(content=text[:2000], embed=embed)
+        except Exception as exc:  # closed DMs, unknown user, network
+            log.error("Couldn't DM the reviewer: %s", exc)
+            return False
+        return True
 
     async def on_ready(self) -> None:
         log.info(
@@ -67,8 +82,20 @@ def register_commands(tree: app_commands.CommandTree, bot: EnganoBot) -> None:
             draft_id, draft.author_id, result.decision.status.value,
             result.completion_status, len(result.findings),
         )
+        embed = render_result(draft, result)
+        needed, reasons = escalation_for(result)
+        if needed and bot.escalation.discord_user_id and str(bot.escalation.discord_user_id) != draft.author_id:
+            sent = await bot.send_to_reviewer(
+                reviewer_message(result, draft.text, "Discord", f"<@{draft.author_id}>", reasons, draft.source_url)
+            )
+            log.info("Review %s %s the reviewer", draft_id, "escalated to" if sent else "could NOT reach")
+            embed.add_field(
+                name="Reviewer",
+                value="Sent to a reviewer for approval." if sent else "I couldn't reach the reviewer automatically. Please contact them directly.",
+                inline=False,
+            )
         await interaction.followup.send(
-            embed=render_result(draft, result),
+            embed=embed,
             view=ReviewActions(settings.studio_url),
             ephemeral=True,
         )

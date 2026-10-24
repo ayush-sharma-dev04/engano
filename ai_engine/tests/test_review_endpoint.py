@@ -69,3 +69,82 @@ def test_cors_allows_studio_origin_only(client):
         headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
     )
     assert "access-control-allow-origin" not in bad.headers
+
+
+def test_provider_findings_quoting_text_not_in_draft_are_dropped(tmp_path):
+    """A small LLM once reported findings on the policy's sample draft instead of the real one."""
+    from ai_engine.agents.coordinator import CoordinatorAgent
+    from ai_engine.providers.base import BaseProvider, ProviderResponse
+    from ai_engine.schemas.findings import EvidenceStatus, Finding, FindingCategory, FindingSeverity, TextSpan
+    from ai_engine.schemas.review import ReviewInput
+
+    def finding(text):
+        return Finding(
+            finding_id="x", category=FindingCategory.TONE_MISMATCH, severity=FindingSeverity.HIGH,
+            highlighted_text=text, text_span=TextSpan(start=0, end=len(text)), explanation="e",
+            evidence_status=EvidenceStatus.UNSUPPORTED, cited_source="Rule 3.1", suggested_fix=None,
+            human_review_required=True,
+        )
+
+    class Liar(BaseProvider):
+        provider_name = "liar"
+
+        def review(self, content_text, policy, deterministic_findings, images=None, context=None):
+            return ProviderResponse(provider_name="liar", findings=[finding("NimbusDB is the fastest database"), finding("great  workouts")])
+
+    repo = MockPolicyRepository()
+    repo.load_fixture(FIXTURE)
+    agent = CoordinatorAgent(repo, config=EngineConfig(), provider=Liar(), retriever=None)
+    result = agent.run_review(ReviewInput(draft_id="d", brand_id="nimbus_cloud", content_text="We make Great workouts fun."))
+    quotes = [f.highlighted_text for f in result.findings]
+    assert "NimbusDB is the fastest database" not in quotes
+    assert "great  workouts" in quotes  # real quote, whitespace/case differences tolerated
+
+
+def test_llm_findings_are_advisory_never_high_or_critical():
+    from ai_engine.agents.coordinator import CoordinatorAgent
+    from ai_engine.providers.base import BaseProvider, ProviderResponse
+    from ai_engine.schemas.findings import EvidenceStatus, Finding, FindingCategory, FindingSeverity, TextSpan
+
+    class Loud(BaseProvider):
+        provider_name = "loud"
+
+        def review(self, content_text, policy, deterministic_findings, images=None, context=None):
+            q = "workouts"
+            return ProviderResponse(provider_name="loud", findings=[Finding(
+                finding_id="x", category=FindingCategory.TONE_MISMATCH, severity=FindingSeverity.CRITICAL,
+                highlighted_text=q, text_span=TextSpan(start=0, end=len(q)), explanation="e",
+                evidence_status=EvidenceStatus.VERIFIED, cited_source="Rule 3.1", suggested_fix=None,
+                human_review_required=False)])
+
+    from ai_engine.schemas.review import ReviewInput
+    repo = MockPolicyRepository()
+    repo.load_fixture(FIXTURE)
+    agent = CoordinatorAgent(repo, config=EngineConfig(), provider=Loud(), retriever=None)
+    result = agent.run_review(ReviewInput(draft_id="d", brand_id="nimbus_cloud", content_text="Great workouts."))
+    llm = [f for f in result.findings if f.cited_source == "Rule 3.1"]
+    assert llm and llm[0].severity.value == "medium" and llm[0].human_review_required
+    assert result.decision.status.value != "RED"
+
+
+def test_llm_finding_citing_no_policy_rule_is_dropped():
+    from ai_engine.agents.coordinator import CoordinatorAgent
+    from ai_engine.providers.base import BaseProvider, ProviderResponse
+    from ai_engine.schemas.findings import EvidenceStatus, Finding, FindingCategory, FindingSeverity, TextSpan
+    from ai_engine.schemas.review import ReviewInput
+
+    class Vague(BaseProvider):
+        provider_name = "vague"
+
+        def review(self, content_text, policy, deterministic_findings, images=None, context=None):
+            return ProviderResponse(provider_name="vague", findings=[Finding(
+                finding_id="x", category=FindingCategory.TONE_MISMATCH, severity=FindingSeverity.MEDIUM,
+                highlighted_text="workouts", text_span=TextSpan(start=0, end=8), explanation="feels off",
+                evidence_status=EvidenceStatus.VERIFIED, cited_source=None, suggested_fix=None,
+                human_review_required=False)])
+
+    repo = MockPolicyRepository()
+    repo.load_fixture(FIXTURE)
+    agent = CoordinatorAgent(repo, config=EngineConfig(), provider=Vague(), retriever=None)
+    result = agent.run_review(ReviewInput(draft_id="d", brand_id="nimbus_cloud", content_text="Great workouts."))
+    assert result.findings == [] and result.decision.status.value == "GREEN"

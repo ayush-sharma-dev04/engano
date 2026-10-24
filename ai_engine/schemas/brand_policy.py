@@ -64,6 +64,8 @@ class ToneRule(BaseModel):
     description: Optional[str] = None
     required_tones: List[str] = Field(default_factory=list)
     prohibited_tones: List[str] = Field(default_factory=list)
+    # Exact phrases that must not appear (matched case-insensitively on word boundaries).
+    prohibited_phrases: List[str] = Field(default_factory=list)
 
 
 class AccessibilityRules(BaseModel):
@@ -79,6 +81,9 @@ class LegalRule(BaseModel):
     requirement: str
     required_disclaimers: List[str] = Field(default_factory=list)
     restricted_claims: List[str] = Field(default_factory=list)
+    # Phrases that make `required_disclaimers` mandatory (e.g. "SLA", "uptime").
+    # When empty, the legacy absolute-SLA patterns are used.
+    trigger_phrases: List[str] = Field(default_factory=list)
 
 
 class BrandPolicy(BaseModel):
