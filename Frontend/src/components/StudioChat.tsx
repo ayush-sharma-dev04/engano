@@ -4,6 +4,8 @@ import type { Question, ReviewSummary, SiteInfo } from '../api'
 import { Icon, Mascot } from '../ui'
 import SuggestionEditor from './SuggestionEditor'
 import { MAX_IMAGES, type AttachedImage } from '../images'
+import { firstLink } from '../links'
+import type { Linked, Turn } from '../turns'
 
 const STEPS = [
   'Checking brand rules',
@@ -47,6 +49,9 @@ type Props = {
   onAddImages: (files: File[]) => void
   onRemoveImage: (id: string) => void
   onAlt: (id: string, alt: string) => void
+  history: Turn[]
+  linked: Linked | null
+  onFollowUp: (text: string) => void
   answers: Record<string, string>
   onAnswer: (answers: Record<string, string>) => void
   onCancel: () => void
@@ -195,6 +200,181 @@ function QuestionsCard({ questions, onSend }: { questions: Question[]; onSend: (
 }
 
 const ANSWER_LABEL = (id: string) => (id === 'website' ? 'Website' : id === 'brand' ? 'Brand' : 'Source')
+
+function MiniFinding({ f }: { f: Finding }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${DOT[f.severity]}`} />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{f.category}</span>
+        <span className="text-[11px] text-slate-500">· {f.severity}</span>
+      </div>
+      <p className="mt-1.5 text-sm font-medium">{f.issue}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-300">{f.explanation}</p>
+    </div>
+  )
+}
+
+function VerdictChip({ summary }: { summary: ReviewSummary }) {
+  return (
+    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${VERDICT[summary.status].tone}`}>
+      {VERDICT[summary.status].title}
+    </span>
+  )
+}
+
+/** The page behind a link in the message: it loads in the background while the text review is already on screen. */
+function LinkedBlock({ linked }: { linked: Linked }) {
+  return (
+    <div className="glass rise rounded-2xl p-5">
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <Icon name="globe" className="h-4 w-4 text-slate-400" />
+        The link in your message
+      </p>
+      <p className="mt-0.5 break-all text-xs text-slate-500">{linked.url}</p>
+
+      {linked.status === 'loading' && (
+        <p className="mt-3 text-sm text-slate-400">
+          Opening the page and checking it
+          <span className="ml-1 inline-flex gap-[3px] align-middle">
+            <i className="dot" />
+            <i className="dot" style={{ animationDelay: '0.15s' }} />
+            <i className="dot" style={{ animationDelay: '0.3s' }} />
+          </span>
+          <span className="block text-xs text-slate-500">This can take a minute. Everything above is already final.</span>
+        </p>
+      )}
+
+      {linked.status === 'error' && <p className="mt-3 text-sm text-red-300">{linked.error}</p>}
+
+      {linked.status === 'done' && linked.site && linked.summary && (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <VerdictChip summary={linked.summary} />
+            <span className="text-xs text-slate-500">{linked.site.title}</span>
+          </div>
+          <img
+            src={linked.site.screenshot}
+            alt={`Screenshot of ${linked.site.url}`}
+            className="max-h-56 w-full rounded-xl object-cover object-top ring-1 ring-white/10"
+          />
+          {linked.site.designNotes.length > 0 && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Design suggestions (AI advice)</p>
+              <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-200">
+                {linked.site.designNotes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(linked.findings ?? []).map((f, i) => (
+            <MiniFinding key={i} f={f} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** An earlier message and its review, kept above the live one. */
+function PastTurn({ turn }: { turn: Turn }) {
+  const [open, setOpen] = useState(false)
+  const shown = turn.findings.filter((_, key) => !turn.hidden.has(key))
+  return (
+    <div className="mb-10">
+      <div className="flex justify-end">
+        <div className="w-[min(100%,42rem)] rounded-3xl bg-slate-800/60 px-5 py-3.5 ring-1 ring-white/5">
+          {turn.site && (
+            <p className="mb-1 flex items-center gap-2 text-sm text-slate-300">
+              <Icon name="globe" className="h-4 w-4 text-slate-500" />
+              <span className="break-all">{turn.site.url}</span>
+            </p>
+          )}
+          {turn.images.length > 0 && <Thumbnails images={turn.images} onAlt={() => {}} editable={false} />}
+          {turn.content.trim() && <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">{turn.content}</p>}
+        </div>
+      </div>
+      <div className="mt-3 flex items-start gap-3 pl-1">
+        <Mascot width={56} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            {turn.summary ? <VerdictChip summary={turn.summary} /> : <span className="text-xs text-red-300">{turn.error ?? 'No result'}</span>}
+            <span className="text-xs text-slate-500">
+              {shown.length} {shown.length === 1 ? 'suggestion' : 'suggestions'}
+              {turn.linked?.status === 'loading' ? ' · still checking the link' : ''}
+            </span>
+            {(shown.length > 0 || turn.linked) && (
+              <button onClick={() => setOpen((o) => !o)} className="text-xs text-violet-300 hover:text-violet-200">
+                {open ? 'Hide details' : 'Show details'}
+              </button>
+            )}
+          </div>
+          {open && (
+            <div className="mt-3 space-y-2">
+              {shown.map((f, i) => (
+                <MiniFinding key={i} f={f} />
+              ))}
+              {turn.linked && <LinkedBlock linked={turn.linked} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The box that stays at the bottom, so the creator can keep drafting after each review. */
+function FollowUpComposer({ disabled, onSend }: { disabled: boolean; onSend: (text: string) => void }) {
+  const [text, setText] = useState('')
+  const link = firstLink(text)
+  const send = () => {
+    if (!text.trim() || disabled) return
+    onSend(text)
+    setText('')
+  }
+  return (
+    <div className="composer p-4">
+      <textarea
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            send()
+          }
+        }}
+        rows={Math.min(6, Math.max(1, text.split('\n').length))}
+        placeholder="Draft another message… paste a link and I'll check that page too"
+        aria-label="Draft another message"
+        className="block w-full resize-none bg-transparent text-sm leading-6 text-white outline-none placeholder:text-slate-500 focus-visible:outline-none"
+      />
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate text-xs text-slate-500">
+          {link ? (
+            <span className="inline-flex items-center gap-1.5 text-violet-300">
+              <Icon name="globe" className="h-3.5 w-3.5" />
+              I'll also check {link.replace(/^https?:\/\//i, '').slice(0, 48)}
+            </span>
+          ) : disabled ? (
+            'Reviewing…'
+          ) : (
+            'Enter to send, Shift+Enter for a new line'
+          )}
+        </span>
+        <button
+          onClick={send}
+          disabled={disabled || !text.trim()}
+          aria-label="Send message"
+          title="Send"
+          className="btn-primary flex h-9 w-9 shrink-0 items-center justify-center !rounded-full"
+        >
+          <Icon name="send" />
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function StudioChat(props: Props) {
   const { content, findings, hidden, summary, started, isReviewing, error } = props
@@ -345,6 +525,10 @@ export default function StudioChat(props: Props) {
           New draft
         </button>
       </div>
+
+      {props.history.map((turn) => (
+        <PastTurn key={turn.id} turn={turn} />
+      ))}
 
       {/* You */}
       <div className="rise relative z-20 flex justify-end">
@@ -514,6 +698,8 @@ export default function StudioChat(props: Props) {
                   </div>
                 ))}
 
+                {props.linked && <LinkedBlock linked={props.linked} />}
+
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                   <div className="flex items-center gap-1">
                     <IconButton label={copied ? 'Copied' : 'Copy'} icon={copied ? 'check' : 'copy'} onClick={copy} />
@@ -532,6 +718,11 @@ export default function StudioChat(props: Props) {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Keep drafting */}
+      <div className="sticky bottom-4 z-30 mt-10">
+        <FollowUpComposer disabled={isReviewing} onSend={props.onFollowUp} />
       </div>
     </div>
   )

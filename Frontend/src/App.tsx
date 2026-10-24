@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { checkWebsite, reviewDraft, type ReviewSummary, type SiteInfo } from './api'
 import { Icon } from './ui'
 import StudioChat from './components/StudioChat'
 import { locate } from './suggestions'
 import { problemWith, readImage, type AttachedImage } from './images'
+import { firstLink } from './links'
+import type { Linked, Turn } from './turns'
 import BrandGuidelines from './components/BrandGuidelines'
 import ReviewQueue, {
   type ReviewSubmission,
@@ -46,6 +48,9 @@ function App() {
   const [content, setContent] = useState('')
 
   const [findings, setFindings] = useState<Finding[]>([])
+  const [history, setHistory] = useState<Turn[]>([])
+  const [linked, setLinked] = useState<Linked | null>(null)
+  const turnId = useRef(1) // which message is live; lets a slow link check land in the right place
   const [siteMode, setSiteMode] = useState(false)
   const [siteUrl, setSiteUrl] = useState('')
   const [site, setSite] = useState<SiteInfo | null>(null)
@@ -79,20 +84,21 @@ function App() {
   // RUN ENGANO REVIEW
   // ==========================================
 
-  const review = async (current: Record<string, string>) => {
+  const review = async (current: Record<string, string>, text: string = content, attached: AttachedImage[] = images) => {
     setIsReviewing(true)
     setReviewStarted(true)
     setReviewError(null)
     setReviewSummary(null)
+    setLinked(null)
 
-    const lowerContent = content.toLowerCase()
+    const lowerContent = text.toLowerCase()
 
     try {
       // The real review: all ENGANO agents run on the backend.
       const { findings: apiFindings, summary } = await reviewDraft(
-        content,
+        text,
         current,
-        images.map((image) => ({ data: image.data, alt_text: image.alt }))
+        attached.map((image) => ({ data: image.data, alt_text: image.alt }))
       )
       const newFindings: Finding[] = [...apiFindings]
 
@@ -146,12 +152,61 @@ function App() {
       setHidden(new Set())
       setFindings(newFindings)
       setReviewSummary(summary)
+      const link = firstLink(text)
+      if (link) startLinked(link)
     } catch (error) {
       setFindings([])
       setReviewError(error instanceof Error ? error.message : 'Review failed.')
     } finally {
       setIsReviewing(false)
     }
+  }
+
+  // ==========================================
+  // LINKS IN A MESSAGE + FOLLOW-UP MESSAGES
+  // ==========================================
+
+  const placeLinked = (turn: number, value: Linked) => {
+    if (turnId.current === turn) setLinked(value)
+    else setHistory((turns) => turns.map((t) => (t.id === turn ? { ...t, linked: value } : t)))
+  }
+
+  // Open the page behind a link in the message. Runs alongside the text review, which shows first.
+  const startLinked = (url: string) => {
+    const turn = turnId.current
+    placeLinked(turn, { url, status: 'loading' })
+    checkWebsite(url)
+      .then((result) => placeLinked(turn, { url, status: 'done', ...result }))
+      .catch((error) =>
+        placeLinked(turn, { url, status: 'error', error: error instanceof Error ? error.message : 'The link check failed.' })
+      )
+  }
+
+  // The creator keeps drafting: the message just reviewed moves up, a new one starts below it.
+  const sendFollowUp = (text: string) => {
+    const message = text.trim()
+    if (!message || isReviewing) return
+    setHistory((turns) => [
+      ...turns,
+      {
+        id: turnId.current, title: draftTitle, content, images, site, findings, hidden,
+        summary: reviewSummary, error: reviewError, answers, linked,
+      },
+    ])
+    turnId.current += 1
+    setContent(message)
+    setDraftTitle('')
+    setImages([])
+    setAnswers({})
+    setFindings([])
+    setHidden(new Set())
+    setReviewSummary(null)
+    setReviewError(null)
+    setSite(null)
+    setSiteMode(false)
+    setSiteUrl('')
+    setLinked(null)
+    return review({}, message, [])
   }
 
   // ==========================================
@@ -272,6 +327,9 @@ function App() {
     setSite(null)
     setSiteMode(false)
     setSiteUrl('')
+    setHistory([])
+    setLinked(null)
+    turnId.current += 1
     setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
@@ -293,6 +351,9 @@ function App() {
     setSite(null)
     setSiteMode(false)
     setSiteUrl('')
+    setHistory([])
+    setLinked(null)
+    turnId.current += 1
     setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
@@ -331,6 +392,9 @@ function App() {
     setSite(null)
     setSiteMode(false)
     setSiteUrl('')
+    setHistory([])
+    setLinked(null)
+    turnId.current += 1
     setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
@@ -664,6 +728,9 @@ function App() {
                   error={reviewError}
                   onRun={runReview}
                   answers={answers}
+                  history={history}
+                  linked={linked}
+                  onFollowUp={sendFollowUp}
                   siteMode={siteMode}
                   onSiteMode={setSiteMode}
                   siteUrl={siteUrl}
