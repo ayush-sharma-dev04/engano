@@ -66,6 +66,10 @@ class ProcessingMetadata(BaseModel):
     processing_time_ms: float = Field(default=0.0, description="Processing duration in milliseconds")
     fallback_occurred: bool = Field(default=False, description="True if safe fallback was triggered")
     fallback_details: Optional[str] = Field(default=None, description="Details explaining fallback event")
+    policy_source: Optional[str] = Field(
+        default=None,
+        description="Observable source of the active brand policy (e.g. supabase, test_fixture).",
+    )
 
 
 class ReviewResult(BaseModel):

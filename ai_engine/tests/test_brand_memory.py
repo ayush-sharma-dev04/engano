@@ -509,8 +509,16 @@ def test_supabase_memory_store_invalid_response_json_is_operational_failure():
 
 def test_brand_memory_migrations_revoke_public_access_and_grant_server_role():
     migration_dir = Path(__file__).parents[2] / "supabase" / "migrations"
-    migration_sql = "\n".join(path.read_text(encoding="utf-8") for path in sorted(migration_dir.glob("*.sql")))
-    normalized_sql = " ".join(migration_sql.lower().split())
+
+    # The brand_memory invariants only apply to migrations touching brand_memory.
+    # Other tables (e.g. brand_policies) may legitimately define created_at.
+    memory_sql = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(migration_dir.glob("*.sql"))
+        if "public.brand_memory" in path.read_text(encoding="utf-8").lower()
+    )
+    assert memory_sql.strip(), "Expected at least one brand_memory migration."
+    normalized_sql = " ".join(memory_sql.lower().split())
 
     for definition in (
         "brand_id text primary key",

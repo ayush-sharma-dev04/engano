@@ -99,6 +99,16 @@ class CoordinatorAgent:
 
         # 1. Authoritative Policy Retrieval
         agents_executed.append("PolicyRetrieval")
+        raw_policy_source = getattr(self.repository, "source_name", None)
+        policy_source = (
+            raw_policy_source if isinstance(raw_policy_source, str) else type(self.repository).__name__
+        )
+        logger.info(
+            "Reviewing draft '%s' for brand '%s' using policy source '%s'.",
+            payload.draft_id,
+            payload.brand_id,
+            policy_source,
+        )
         try:
             policy: Optional[BrandPolicy] = self.repository.get_policy(payload.brand_id)
         except Exception as exc:
@@ -121,6 +131,7 @@ class CoordinatorAgent:
                     agents_executed=agents_executed,
                     processing_time_ms=duration_ms,
                     fallback_occurred=False,
+                    policy_source=policy_source,
                 ),
             )
 
@@ -143,6 +154,7 @@ class CoordinatorAgent:
                     agents_executed=agents_executed,
                     processing_time_ms=duration_ms,
                     fallback_occurred=False,
+                    policy_source=policy_source,
                 ),
             )
 
@@ -302,6 +314,7 @@ class CoordinatorAgent:
                 processing_time_ms=duration_ms,
                 fallback_occurred=fallback_occurred,
                 fallback_details=fallback_details,
+                policy_source=policy_source,
             ),
         )
 

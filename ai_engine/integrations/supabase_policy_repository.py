@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 class BasePolicyRepository(ABC):
     """Abstract policy repository interface."""
 
+    @property
+    def source_name(self) -> str:
+        """Human-readable source identifier exposed in review metadata/logs."""
+        return type(self).__name__
+
     @abstractmethod
     def get_policy(self, brand_id: str) -> Optional[BrandPolicy]:
         """Retrieve authoritative brand policy by brand_id.
@@ -36,6 +41,10 @@ class MockPolicyRepository(BasePolicyRepository):
     Explicitly isolated for automated tests and local benchmarks.
     Never used silently in production requests.
     """
+
+    @property
+    def source_name(self) -> str:
+        return "test_fixture"
 
     def __init__(self, initial_policies: Optional[Dict[str, BrandPolicy]] = None) -> None:
         self._policies: Dict[str, BrandPolicy] = initial_policies or {}
@@ -64,10 +73,16 @@ class MockPolicyRepository(BasePolicyRepository):
 class SupabasePolicyRepository(BasePolicyRepository):
     """Production Supabase policy repository boundary.
 
-    Connects via authenticated PostgREST API endpoint.
-    Respects Row-Level Security (RLS) using publishable anon key.
+    Authenticates with the backend-only service-role secret key
+    (SUPABASE_SECRET_KEY), consistent with SupabaseBrandMemoryStore.
+    The brand_policies table grants access only to service_role;
+    anon / authenticated keys will be rejected by RLS.
     Never mutates schema or tables.
     """
+
+    @property
+    def source_name(self) -> str:
+        return "supabase"
 
     def __init__(
         self,
@@ -75,28 +90,31 @@ class SupabasePolicyRepository(BasePolicyRepository):
         http_client: Optional[httpx.Client] = None,
     ) -> None:
         self.config = config or get_engine_config()
-        self.supabase_url = self.config.supabase_url
-        self.publishable_key = (
-            self.config.supabase_publishable_key.get_secret_value()
-            if self.config.supabase_publishable_key
+        self.supabase_url = (
+            self.config.supabase_url.strip() if self.config.supabase_url else None
+        )
+        self.secret_key = (
+            self.config.supabase_secret_key.get_secret_value().strip()
+            if self.config.supabase_secret_key
             else None
         )
         self.timeout = self.config.request_timeout_seconds
         self._client = http_client or httpx.Client(timeout=self.timeout)
 
-    def get_policy(self, brand_id: str) -> Optional[BrandPolicy]:
-        """Fetch authoritative policy from Supabase brand_policies table."""
-        if not self.supabase_url or not self.publishable_key:
+    def _get_headers(self) -> Dict[str, str]:
+        if not self.supabase_url or not self.secret_key:
             raise RuntimeError(
-                "Supabase integration is unconfigured. Set SUPABASE_URL and "
-                "SUPABASE_PUBLISHABLE_KEY. Production code will not substitute test fixtures."
+                "Supabase policy repository unconfigured. "
+                "SUPABASE_URL and SUPABASE_SECRET_KEY are required."
             )
-
-        headers = {
-            "apikey": self.publishable_key,
-            "Authorization": f"Bearer {self.publishable_key}",
+        return {
+            "apikey": self.secret_key,
             "Accept": "application/json",
         }
+
+    def get_policy(self, brand_id: str) -> Optional[BrandPolicy]:
+        """Fetch authoritative policy from Supabase brand_policies table."""
+        headers = self._get_headers()
         endpoint = f"{self.supabase_url.rstrip('/')}/rest/v1/brand_policies"
         params = {"brand_id": f"eq.{brand_id}", "select": "*"}
 
@@ -107,9 +125,10 @@ class SupabasePolicyRepository(BasePolicyRepository):
                 f"Failed to connect to Supabase: {type(exc).__name__}: {exc}"
             ) from None
 
-        if response.status_code == 401 or response.status_code == 403:
+        if response.status_code in (401, 403):
             raise PermissionError(
-                f"Supabase access denied (HTTP {response.status_code}). Check RLS and API key permissions."
+                f"Supabase access denied (HTTP {response.status_code}). "
+                "Verify SUPABASE_SECRET_KEY has service_role privileges."
             )
 
         if response.status_code != 200:

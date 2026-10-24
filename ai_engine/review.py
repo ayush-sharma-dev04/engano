@@ -6,7 +6,9 @@ the FastAPI backend, CLI utilities, and channel integrations:
     from ai_engine.review import run_brand_review
     from ai_engine.schemas import DraftPayload, ReviewInput
 
-    result = run_brand_review(DraftPayload(draft_id="1", brand_id="nimbus", content_text="..."))
+    result = run_brand_review(
+        DraftPayload(draft_id="1", brand_id="your_brand", content_text="...")
+    )
 """
 
 from typing import Optional, Union

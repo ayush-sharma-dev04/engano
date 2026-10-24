@@ -1,0 +1,71 @@
+{
+  "brand_id": "ledgerpro_finance",
+  "brand_name": "LedgerPro",
+  "description": "Test-only policy for the fictional bookkeeping software company LedgerPro. Used exclusively by the brand-agnostic regression suite; never a production policy source.",
+  "approved_terminology": [
+    {
+      "term_id": "term_ledgerpro",
+      "approved_term": "LedgerPro Accounting",
+      "prohibited_variants": ["LedgerPro app", "LedgerProSuite"],
+      "replacement_suggestion": "LedgerPro Accounting",
+      "case_sensitive": false
+    }
+  ],
+  "claims_policy": {
+    "superlatives_require_benchmark": true,
+    "rule_reference": "LedgerPro Claims Rule",
+    "superlative_patterns": [
+      "the most accurate books guaranteed",
+      "best accounting software in the world"
+    ],
+    "forbidden_guarantees": [
+      "guaranteed investment returns",
+      "guaranteed returns",
+      "guaranteed profits",
+      "risk-free returns",
+      "no risk of loss"
+    ],
+    "permitted_benchmarks": []
+  },
+  "factual_rules": [
+    {
+      "rule_id": "ledgerpro_no_investment_advice",
+      "topic": "financial_regulatory_scope",
+      "approved_fact": "LedgerPro Accounting is bookkeeping and reporting software; it does not provide investment advice or guarantee financial outcomes.",
+      "prohibited_claims": [
+        "guaranteed investment returns",
+        "guaranteed profits",
+        "guaranteed returns"
+      ]
+    }
+  ],
+  "offers": [
+    {
+      "offer_id": "ledgerpro_trial",
+      "name": "30-day trial",
+      "description": "Standard 30-day trial for new businesses.",
+      "is_retired": false
+    }
+  ],
+  "tone_rules": [
+    {
+      "rule_id": "LedgerPro Tone 1",
+      "description": "Precise, professional, compliance-first voice; no hype and no investment promises.",
+      "required_tones": ["precise", "professional"],
+      "prohibited_tones": ["aggressive hype", "financial bravado"]
+    }
+  ],
+  "accessibility_rules": {
+    "min_normal_contrast": 4.5,
+    "min_large_contrast": 3.0,
+    "require_alt_text": true
+  },
+  "legal_rules": [
+    {
+      "rule_id": "ledgerpro_no_performance_promises",
+      "requirement": "Marketing copy must not promise investment performance or guaranteed financial outcomes.",
+      "required_disclaimers": [],
+      "restricted_claims": ["led by expert traders"]
+    }
+  ]
+}

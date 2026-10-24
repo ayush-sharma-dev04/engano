@@ -37,6 +37,7 @@
       "rule_id": "fact_sla_uptime",
       "topic": "uptime_sla",
       "approved_fact": "Nimbus Cloud guarantees 99.95% monthly uptime SLA.",
+      "suggested_correction": "99.95% uptime SLA",
       "prohibited_claims": ["100% uptime", "100% SLA"],
       "validity_start": "2024-01-01",
       "validity_end": "2026-12-31",

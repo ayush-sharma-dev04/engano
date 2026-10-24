@@ -45,12 +45,14 @@ def evaluate_claims(
 
     # 1. Superlative Claims
     if claims_policy.superlatives_require_benchmark:
+        # Generic default patterns applied only when the active brand policy
+        # does not define its own superlative patterns.
         superlative_patterns = claims_policy.superlative_patterns or [
-            "fastest database in the world",
-            "fastest database",
-            "best in the world",
-            "best database in the world",
-            "highest performance",
+            "the best in the world",
+            "world's best",
+            "the world's best",
+            "unbeatable",
+            "second to none",
         ]
 
         for phrase in superlative_patterns:
@@ -62,12 +64,12 @@ def evaluate_claims(
                 matched_text = content_text[start:end]
 
                 # Check if an authorized benchmark is provided in supplied evidence
-                has_b4 = any(
+                has_benchmark = any(
                     _has_applicable_benchmark(b.benchmark_id, supplied_evidence)
                     for b in claims_policy.permitted_benchmarks
                 )
 
-                if has_b4:
+                if has_benchmark:
                     evidence_status = EvidenceStatus.UNVERIFIED_PROVIDED
                     severity = FindingSeverity.LOW
                     explanation = (
@@ -78,12 +80,14 @@ def evaluate_claims(
                 else:
                     evidence_status = EvidenceStatus.UNSUPPORTED
                     severity = FindingSeverity.HIGH
-                    rule_ref = claims_policy.rule_reference or "claims policy"
+                    rule_ref = claims_policy.rule_reference or "the brand claims policy"
                     explanation = (
                         f"Unsupported superlative claim '{matched_text}'. Per {rule_ref}, "
                         "comparative superlatives require an authorized benchmark citation."
                     )
-                    fix = "high-performance database"
+                    # No fabricated replacement: correction requires either a brand-supplied
+                    # benchmark or reviewer-provided qualified wording.
+                    fix = None
 
                 findings.append(
                     Finding(
@@ -94,7 +98,7 @@ def evaluate_claims(
                         text_span=TextSpan(start=start, end=end),
                         explanation=explanation,
                         evidence_status=evidence_status,
-                        cited_source="Rule 4.2 Superlative Policy",
+                        cited_source=f"{claims_policy.rule_reference or 'Claims Policy'}: Superlative Policy",
                         suggested_fix=fix,
                         human_review_required=True,
                     )
@@ -115,23 +119,45 @@ def evaluate_claims(
             start, end = match.span()
             matched_text = content_text[start:end]
 
-            # Check if this guarantee conflicts with SLA fact
-            is_uptime = "100%" in phrase.lower() and "uptime" in phrase.lower()
-            if is_uptime:
+            # Check if the forbidden guarantee is contradicted by an authoritative
+            # brand factual rule configured in the active policy (brand-agnostic:
+            # the contradiction wording always comes from the brand's own data).
+            conflicting_rule = next(
+                (
+                    rule
+                    for rule in policy.factual_rules
+                    if rule.is_active
+                    and any(
+                        prohibited.strip().lower() == phrase.strip().lower()
+                        for prohibited in rule.prohibited_claims
+                    )
+                ),
+                None,
+            )
+            if conflicting_rule is not None:
                 category = FindingCategory.WRONG_FACT
                 severity = FindingSeverity.CRITICAL
                 status = EvidenceStatus.CONTRADICTED
                 explanation = (
-                    f"Contradicted claim '{matched_text}'. Nimbus SLA guarantees 99.95% monthly uptime. "
-                    "Absolute 100% uptime promises are prohibited."
+                    f"Contradicted claim '{matched_text}'. {conflicting_rule.rule_id} asserts "
+                    f"the authoritative brand fact: '{conflicting_rule.approved_fact}'."
                 )
-                fix = "99.95% uptime SLA"
+                fix = conflicting_rule.suggested_correction or conflicting_rule.approved_fact
             else:
                 category = FindingCategory.UNSUPPORTED_CLAIM
                 severity = FindingSeverity.HIGH
                 status = EvidenceStatus.UNSUPPORTED
-                explanation = f"Absolute guarantee '{matched_text}' is prohibited by brand claims policy."
-                fix = "proven results"
+                explanation = (
+                    f"Absolute guarantee '{matched_text}' is prohibited by the active "
+                    "brand claims policy."
+                )
+                fix = None
+
+            cited_source = (
+                f"Authoritative Brand Fact: {conflicting_rule.rule_id}"
+                if conflicting_rule is not None
+                else "Brand Guarantee Policy"
+            )
 
             findings.append(
                 Finding(
@@ -139,10 +165,9 @@ def evaluate_claims(
                     category=category,
                     severity=severity,
                     highlighted_text=matched_text,
-                    text_span=TextSpan(start=start, end=end),
-                    explanation=explanation,
-                    evidence_status=status,
-                    cited_source="Brand Guarantee Policy",
+                    text_span=TextSpan(start=start, end=end),                        explanation=explanation,
+                        evidence_status=status,
+                        cited_source=cited_source,
                     suggested_fix=fix,
                     human_review_required=True,
                 )
@@ -169,7 +194,7 @@ def evaluate_claims(
                     text_span=TextSpan(start=start, end=end),
                     explanation=(
                         f"Absolute legal claim '{matched_text}' is prohibited by brand claims policy; "
-                        "absolute legal guarantees cannot be substantiated."
+                        "absolute legal guarantees cannot be substantiated for any brand."
                     ),
                     evidence_status=EvidenceStatus.UNSUPPORTED,
                     cited_source="Rule 4.2 Legal Claims Policy",

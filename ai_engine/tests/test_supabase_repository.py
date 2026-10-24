@@ -24,12 +24,49 @@ def test_mock_repository_missing_brand():
     assert repo.get_policy("nonexistent_brand") is None
 
 
-def test_supabase_unconfigured_never_substitutes_fixtures():
-    # When Supabase is not configured, get_policy must raise rather than silently fallback
-    repo = SupabasePolicyRepository(config=EngineConfig(SUPABASE_URL="", SUPABASE_PUBLISHABLE_KEY=""))
+def test_supabase_unconfigured_raises_without_secret_key():
+    """When SUPABASE_SECRET_KEY is missing, get_policy must raise rather than silently fallback."""
+    repo = SupabasePolicyRepository(config=EngineConfig(
+        SUPABASE_URL="https://example.supabase.co",
+        SUPABASE_SECRET_KEY=None,
+    ))
     with pytest.raises(RuntimeError) as exc:
         repo.get_policy("nimbus_cloud")
-    assert "Supabase integration is unconfigured" in str(exc.value)
+    assert "SUPABASE_SECRET_KEY" in str(exc.value)
+
+
+def test_supabase_unconfigured_raises_without_url():
+    """When SUPABASE_URL is missing, get_policy must raise."""
+    repo = SupabasePolicyRepository(config=EngineConfig(
+        SUPABASE_URL="",
+        SUPABASE_SECRET_KEY="mock-secret",
+    ))
+    with pytest.raises(RuntimeError) as exc:
+        repo.get_policy("nimbus_cloud")
+    assert "SUPABASE_URL" in str(exc.value)
+
+
+def test_supabase_unconfigured_both_missing():
+    """When both URL and key are missing, get_policy must raise."""
+    repo = SupabasePolicyRepository(config=EngineConfig(
+        SUPABASE_URL="",
+        SUPABASE_SECRET_KEY=None,
+    ))
+    with pytest.raises(RuntimeError) as exc:
+        repo.get_policy("nimbus_cloud")
+    assert "unconfigured" in str(exc.value).lower()
+
+
+def test_supabase_publishable_key_alone_is_insufficient():
+    """A publishable key without a secret key cannot authorize server-side policy access."""
+    repo = SupabasePolicyRepository(config=EngineConfig(
+        SUPABASE_URL="https://example.supabase.co",
+        SUPABASE_PUBLISHABLE_KEY="anon-key",
+        SUPABASE_SECRET_KEY=None,
+    ))
+    with pytest.raises(RuntimeError) as exc:
+        repo.get_policy("nimbus_cloud")
+    assert "SUPABASE_SECRET_KEY" in str(exc.value)
 
 
 def test_supabase_permission_error():
@@ -42,7 +79,7 @@ def test_supabase_permission_error():
     repo = SupabasePolicyRepository(
         config=EngineConfig(
             SUPABASE_URL="https://example.supabase.co",
-            SUPABASE_PUBLISHABLE_KEY="mock-anon-key",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
         ),
         http_client=mock_client,
     )
@@ -58,7 +95,7 @@ def test_supabase_connectivity_failure():
     repo = SupabasePolicyRepository(
         config=EngineConfig(
             SUPABASE_URL="https://example.supabase.co",
-            SUPABASE_PUBLISHABLE_KEY="mock-anon-key",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
         ),
         http_client=mock_client,
     )
@@ -77,7 +114,7 @@ def test_supabase_successful_deserialization(nimbus_policy: BrandPolicy):
     repo = SupabasePolicyRepository(
         config=EngineConfig(
             SUPABASE_URL="https://example.supabase.co",
-            SUPABASE_PUBLISHABLE_KEY="mock-anon-key",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
         ),
         http_client=mock_client,
     )
@@ -85,3 +122,68 @@ def test_supabase_successful_deserialization(nimbus_policy: BrandPolicy):
     assert policy is not None
     assert policy.brand_id == "nimbus_cloud"
     assert policy.brand_name == "Nimbus Cloud"
+
+
+def test_supabase_authenticated_request_uses_service_role_key():
+    """Verify the HTTP request carries the secret key in the apikey header, not the anon key."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = []
+    mock_client.get.return_value = mock_resp
+
+    repo = SupabasePolicyRepository(
+        config=EngineConfig(
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_PUBLISHABLE_KEY="anon-key-should-not-appear",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
+        ),
+        http_client=mock_client,
+    )
+    repo.get_policy("nimbus_cloud")
+
+    # Inspect the actual call
+    mock_client.get.assert_called_once()
+    call_kwargs = mock_client.get.call_args
+    headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
+    assert headers["apikey"] == "mock-service-role-key"
+    # Must NOT contain the anon/publishable key
+    assert "anon-key-should-not-appear" not in str(headers)
+
+
+def test_supabase_brand_not_found_returns_none():
+    """Query returning empty array yields None, not an error."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = []
+    mock_client.get.return_value = mock_resp
+
+    repo = SupabasePolicyRepository(
+        config=EngineConfig(
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
+        ),
+        http_client=mock_client,
+    )
+    assert repo.get_policy("nonexistent_brand") is None
+
+
+def test_supabase_server_error():
+    """Non-200 non-auth status codes raise RuntimeError."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.text = "Internal Server Error"
+    mock_client.get.return_value = mock_resp
+
+    repo = SupabasePolicyRepository(
+        config=EngineConfig(
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_SECRET_KEY="mock-service-role-key",
+        ),
+        http_client=mock_client,
+    )
+    with pytest.raises(RuntimeError) as exc:
+        repo.get_policy("any_brand")
+    assert "HTTP 500" in str(exc.value)

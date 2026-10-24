@@ -86,9 +86,39 @@ class ReviewService:
         target_id = brand_id or self.settings.brand_id
         return self.memory_store.update_preferences(target_id, updates)
 
-    async def review_text(self, draft_id: str, text: str) -> ReviewResult:
-        request = ReviewInput(draft_id=draft_id, brand_id=self.settings.brand_id, content_text=text)
-        memory = self.get_brand_memory(self.settings.brand_id)
+    def resolve_brand_id(self, brand_id: Optional[str] = None) -> str:
+        """Resolve the brand for a single review request.
+
+        Resolution order: explicit per-request brand, then the configured
+        workspace default (ENGANO_BRAND_ID). There is no hardcoded fallback
+        brand: if neither is provided, a clear error is raised instead of
+        silently reviewing under a sample brand.
+        """
+        resolved = (brand_id or self.settings.brand_id or "").strip().lower()
+        if not resolved:
+            raise ValueError(
+                "No brand could be resolved for this review: pass an explicit "
+                "brand_id or configure ENGANO_BRAND_ID."
+            )
+        return resolved
+
+    async def review_text(
+        self, draft_id: str, text: str, brand_id: Optional[str] = None
+    ) -> ReviewResult:
+        """Review text for an explicitly resolved brand.
+
+        The brand and draft remain associated through the whole review and
+        rewrite lifecycle; memory is fetched for the same resolved brand.
+        """
+        resolved_brand = self.resolve_brand_id(brand_id)
+        request = ReviewInput(draft_id=draft_id, brand_id=resolved_brand, content_text=text)
+        memory = self.get_brand_memory(resolved_brand)
+        log.info(
+            "Reviewing draft '%s' for brand '%s' (policy_source=%s)",
+            draft_id,
+            resolved_brand,
+            self.settings.policy_source,
+        )
         # run_brand_review is synchronous (and may call an LLM), so keep it off the event loop.
         return await asyncio.to_thread(run_brand_review, request, self.repository, None, None, memory)
 

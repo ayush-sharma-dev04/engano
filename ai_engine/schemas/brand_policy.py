@@ -38,6 +38,9 @@ class FactualRule(BaseModel):
     rule_id: str
     topic: str
     approved_fact: str
+    # Optional brand-configured short replacement wording for claims that
+    # contradict `approved_fact`. Falls back to `approved_fact` verbatim when unset.
+    suggested_correction: Optional[str] = None
     prohibited_claims: List[str] = Field(default_factory=list)
     validity_start: Optional[date] = None
     validity_end: Optional[date] = None

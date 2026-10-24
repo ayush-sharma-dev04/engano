@@ -1,0 +1,59 @@
+{
+  "brand_id": "ojas_fitness",
+  "brand_name": "OJAS",
+  "description": "Test-only policy for the fictional AI fitness platform OJAS. Used exclusively by the brand-agnostic regression suite; never a production policy source.",
+  "approved_terminology": [
+    {
+      "term_id": "term_ojas",
+      "approved_term": "OJAS",
+      "prohibited_variants": ["Ojasfit", "OJAS Fitness App", "Ojas.ai"],
+      "replacement_suggestion": "OJAS",
+      "case_sensitive": false
+    }
+  ],
+  "claims_policy": {
+    "superlatives_require_benchmark": true,
+    "rule_reference": "OJAS Claims Rule",
+    "superlative_patterns": [
+      "best fitness platform in the world",
+      "number one fitness app",
+      "fittest app on the planet"
+    ],
+    "forbidden_guarantees": [
+      "guaranteed weight loss",
+      "guaranteed six-pack",
+      "guaranteed fitness results"
+    ],
+    "permitted_benchmarks": []
+  },
+  "factual_rules": [
+    {
+      "rule_id": "ojas_product_scope",
+      "topic": "product_description",
+      "approved_fact": "OJAS is an AI-powered fitness platform with exercise tracking, competitive face-offs, and fitness challenges.",
+      "prohibited_claims": ["OJAS cures diseases", "OJAS is a medical device"]
+    }
+  ],
+  "offers": [
+    {
+      "offer_id": "ojas_creator_budget",
+      "name": "negotiable creator budget",
+      "description": "Creator collaborations are paid with a negotiable budget.",
+      "is_retired": false
+    }
+  ],
+  "tone_rules": [
+    {
+      "rule_id": "OJAS Tone 1",
+      "description": "Energetic but factual; no medical promises and no aggressive hype.",
+      "required_tones": ["energetic", "factual"],
+      "prohibited_tones": ["aggressive hype", "medical advice"]
+    }
+  ],
+  "accessibility_rules": {
+    "min_normal_contrast": 4.5,
+    "min_large_contrast": 3.0,
+    "require_alt_text": true
+  },
+  "legal_rules": []
+}

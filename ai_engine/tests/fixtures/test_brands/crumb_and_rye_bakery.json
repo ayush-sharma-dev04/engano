@@ -1,0 +1,55 @@
+{
+  "brand_id": "crumb_and_rye_bakery",
+  "brand_name": "Crumb & Rye Bakery",
+  "description": "Test-only policy for the fictional neighborhood bakery Crumb & Rye. Used exclusively by the brand-agnostic regression suite; never a production policy source.",
+  "approved_terminology": [
+    {
+      "term_id": "term_crumb_and_rye",
+      "approved_term": "Crumb & Rye",
+      "prohibited_variants": ["Crumb&Rye", "Crumb and Rye", "CrumbRye"],
+      "replacement_suggestion": "Crumb & Rye",
+      "case_sensitive": false
+    }
+  ],
+  "claims_policy": {
+    "superlatives_require_benchmark": false,
+    "rule_reference": "Bakery Claims Rule",
+    "superlative_patterns": ["the best bakery in town", "award-winning sourdough"],
+    "forbidden_guarantees": [
+      "guaranteed gluten-free",
+      "guaranteed no allergens",
+      "never goes stale"
+    ],
+    "permitted_benchmarks": []
+  },
+  "factual_rules": [
+    {
+      "rule_id": "bakery_sourdough",
+      "topic": "sourdough_leavening",
+      "approved_fact": "All Crumb & Rye sourdough is naturally leavened with our 12-year-old starter.",
+      "prohibited_claims": ["sourdough with added commercial yeast"]
+    }
+  ],
+  "offers": [
+    {
+      "offer_id": "bakery_loalty",
+      "name": "loyalty card punch",
+      "description": "Buy nine loaves, get the tenth free with a loyalty card.",
+      "is_retired": false
+    }
+  ],
+  "tone_rules": [
+    {
+      "rule_id": "Bakery Tone 1",
+      "description": "Warm, plain-spoken neighborhood voice; no aggressive hype.",
+      "required_tones": ["warm", "plain-spoken"],
+      "prohibited_tones": ["aggressive hype", "medical advice"]
+    }
+  ],
+  "accessibility_rules": {
+    "min_normal_contrast": 4.5,
+    "min_large_contrast": 3.0,
+    "require_alt_text": true
+  },
+  "legal_rules": []
+}

@@ -26,6 +26,20 @@ def evaluate_factual(
     findings: List[Finding] = []
     eval_date = current_date or date.today()
 
+    # Resolve currently active offer names from the brand's own policy data
+    # (brand-agnostic: never fabricate an example offer for the brand).
+    active_offer_names = [
+        offer.name
+        for offer in policy.offers
+        if not (offer.is_retired or (offer.validity_end and eval_date > offer.validity_end))
+        and offer.name
+    ]
+    active_offer_hint = (
+        f" Active offers: {', '.join(active_offer_names)}."
+        if active_offer_names
+        else " No active offer is currently configured."
+    )
+
     # 1. Inspect Offers (Active vs Retired / Expired)
     for offer in policy.offers:
         is_expired = offer.validity_end and eval_date > offer.validity_end
@@ -54,13 +68,15 @@ def evaluate_factual(
                             severity=FindingSeverity.HIGH,
                             highlighted_text=matched_text,
                             text_span=TextSpan(start=start, end=end),
-                            explanation=(
-                                f"The promotional offer '{matched_text}' has been retired "
-                                f"(valid until {offer.validity_end or 'past'}). Active offer: 14-day free trial."
-                            ),
-                            evidence_status=EvidenceStatus.CONTRADICTED,
-                            cited_source=f"Brand Offer Catalog: {offer.offer_id}",
-                            suggested_fix="14-day free trial",
+                        explanation=(
+                            f"The promotional offer '{matched_text}' has been retired "
+                            f"(valid until {offer.validity_end or 'past'}).{active_offer_hint}"
+                        ),
+                        evidence_status=EvidenceStatus.CONTRADICTED,
+                        cited_source=f"Brand Offer Catalog: {offer.offer_id}",
+                        suggested_fix=(
+                            active_offer_names[0] if active_offer_names else None
+                        ),
                             human_review_required=True,
                         )
                     )
