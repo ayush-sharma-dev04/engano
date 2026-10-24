@@ -80,6 +80,17 @@ class WebsiteSpecialist(BaseSpecialist):
         out: List[Finding] = []
         W, V = FindingCategory.VISUAL_WCAG, FindingSeverity
 
+        if facts.get("stillLoading"):
+            out.append(_finding("Still on a loading screen", V.MEDIUM, W,
+                f"After {facts.get('settleSeconds', 25):.0f} seconds the page was still showing a loading screen, so this check "
+                "may only reflect the loader. Visitors on slower connections wait at least as long. Try a lighter first screen.",
+                "Page performance best practice (WCAG 2.2.1 Timing Adjustable)"))
+        elif float(facts.get("settleSeconds") or 0) >= 6:
+            out.append(_finding("Slow to show content", V.LOW, W,
+                f"The page took about {facts['settleSeconds']:.0f} seconds before it stopped changing. "
+                "Show the main content sooner, or give the loading screen a way to skip.",
+                "Page performance best practice"))
+
         missing, total = int(facts.get("imagesMissingAlt") or 0), int(facts.get("images") or 0)
         if missing:
             eg = ", ".join(facts.get("missingAltExamples") or [])

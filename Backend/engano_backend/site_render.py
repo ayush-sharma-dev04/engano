@@ -12,6 +12,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional
 
@@ -27,6 +28,9 @@ MAX_SCREENSHOTS = 3
 PAGE_TIMEOUT_MS = 20_000
 TOTAL_TIMEOUT_S = 70
 MAX_TEXT_CHARS = 20_000
+SETTLE_MAX_SECONDS = 25      # how long to wait for a page to finish loading and stop moving
+SETTLE_POLL_MS = 600
+LOADING_WORDS = re.compile(r"\b(loading|please wait|initiali[sz]ing|starting up|booting)\b", re.I)
 _SLOTS = asyncio.Semaphore(2)  # Chromium is heavy: at most two renders at once
 
 # Runs inside the page. Read-only: it measures, it never changes the page.
@@ -211,9 +215,10 @@ async def _render(url: str, resolve: Resolver, is_public: Callable[[str], bool],
                     raise SiteError(_friendly(exc)) from None
                 if response is None or response.status >= 400:
                     raise SiteError(f"the site answered with an error ({response.status if response else 'no response'})")
-                await page.wait_for_timeout(1500)  # let entrance animations and lazy content settle
+                waited, settled, still_loading = await _settle(page)
 
                 facts = await page.evaluate(FACTS_JS)
+                facts.update(settleSeconds=round(waited, 1), settled=settled, stillLoading=still_loading)
                 try:
                     text = (await page.inner_text("body"))[:MAX_TEXT_CHARS]
                 except PlaywrightError:
@@ -234,6 +239,38 @@ async def _render(url: str, resolve: Resolver, is_public: Callable[[str], bool],
                 await browser.close()
     finally:
         await proxy.stop()
+
+
+async def _settle(page) -> tuple:
+    """Wait for the page to finish loading and stop changing before it is photographed.
+
+    Many sites (single-page apps especially) show a loading screen long after the browser's
+    "load" event. We wait for the network to go quiet, then for two identical frames in a row
+    with no "loading" wording on screen, but never longer than SETTLE_MAX_SECONDS.
+    Returns (seconds waited, settled, still showing a loading screen).
+    """
+    from playwright.async_api import Error as PlaywrightError
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    try:
+        await page.wait_for_load_state("networkidle", timeout=8000)
+    except PlaywrightError:
+        pass  # chatty pages never go idle; the frame check below still applies
+    previous, same, loading = None, 0, False
+    while loop.time() - start < SETTLE_MAX_SECONDS:
+        try:
+            frame = await page.screenshot(type="jpeg", quality=35)
+            text = (await page.inner_text("body"))[:2000]
+        except PlaywrightError:
+            break
+        loading = bool(LOADING_WORDS.search(text)) and len(text.strip()) < 600
+        same = same + 1 if (frame == previous and not loading) else 0
+        previous = frame
+        if same >= 2:
+            return loop.time() - start, True, False
+        await page.wait_for_timeout(SETTLE_POLL_MS)
+    return loop.time() - start, False, loading
 
 
 def _friendly(exc: Exception) -> str:

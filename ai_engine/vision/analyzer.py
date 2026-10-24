@@ -133,6 +133,8 @@ class ImageAnalyzer:
 
     def _understand(self, item: ImageItem, img, policy: BrandPolicy) -> None:
         meta = item.metadata
+        if meta.get("skip_understanding"):
+            return  # e.g. later screenshots of a website: text and contrast are enough
         if self.provider is None:
             meta["understanding_unavailable"] = True
             return

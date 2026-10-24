@@ -211,7 +211,13 @@ class ReviewService:
             channel=ChannelType.WEB_STUDIO,
             content_text=site.text[:10_000],
             images=[
-                ImageItem(alt_text=f"Screenshot {i} of {site.final_url}", mime_type="image/png", metadata={"base64": b})
+                ImageItem(
+                    alt_text=f"Screenshot {i} of {site.final_url}",
+                    mime_type="image/png",
+                    # Screenshots get text and contrast checks. The AI looks at the page once, for design
+                    # suggestions, so describing each screenshot (and hunting for logos) would be a second, slower look.
+                    metadata={"base64": b, "skip_understanding": True},
+                )
                 for i, b in enumerate(shots, 1)
             ],
             # The site is already open, so don't ask the creator for its address again.

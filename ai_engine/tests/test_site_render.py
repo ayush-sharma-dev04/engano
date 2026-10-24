@@ -96,3 +96,43 @@ def test_internal_targets_are_refused_up_front():
     for url in ("http://127.0.0.1", "http://localhost", "http://169.254.169.254/latest", "http://10.0.0.1", "file:///etc/passwd"):
         with pytest.raises(SiteError):
             asyncio.run(render_site(url))
+
+
+SLOW = """<!doctype html><html lang="en"><head><title>Slow app</title></head><body>
+<div id="app">LOADING POSE ENGINE 0%</div><script>
+let n = 0; const t = setInterval(() => { n += 20; document.getElementById('app').textContent = 'LOADING POSE ENGINE ' + n + '%'; }, 400);
+setTimeout(() => { clearInterval(t); document.getElementById('app').innerHTML =
+  '<h1>Welcome to the real page</h1><p>' + 'The finished content is here. '.repeat(20) + '</p>'; }, 3000);
+</script></body></html>"""
+
+NEVER = """<!doctype html><title>Never done</title><div id="a">Loading</div><script>
+let n = 0; setInterval(() => { document.getElementById('a').textContent = 'Loading ' + (++n); }, 100);</script>"""
+
+
+def _render(body, monkeypatch, **patch):
+    for name, value in patch.items():
+        monkeypatch.setattr("engano_backend.site_render." + name, value)
+
+    async def scenario():
+        server, port = await serve(body, "127.0.0.2")
+        monkeypatch.setattr(website, "ALLOWED_PORTS", {None, 80, 443, port})
+        try:
+            async def resolve(host):
+                return ["127.0.0.2"]
+            return await render_site(f"http://slow.test:{port}/", resolve=resolve, is_public=only_loopback_2, allowed_ports=frozenset({port}))
+        finally:
+            server.close()
+
+    return asyncio.run(scenario())
+
+
+def test_the_renderer_waits_past_a_loading_screen_instead_of_photographing_it(monkeypatch):
+    site = _render(SLOW, monkeypatch)
+    assert "Welcome to the real page" in site.text and "LOADING" not in site.text
+    assert site.facts["settled"] is True and site.facts["stillLoading"] is False
+    assert 2 <= site.facts["settleSeconds"] < 20
+
+
+def test_a_page_that_never_finishes_is_reported_not_trusted(monkeypatch):
+    site = _render(NEVER, monkeypatch, SETTLE_MAX_SECONDS=4)
+    assert site.facts["settled"] is False and site.facts["stillLoading"] is True and site.screenshots

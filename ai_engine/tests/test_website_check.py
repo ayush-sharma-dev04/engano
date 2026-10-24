@@ -174,3 +174,42 @@ def test_a_broken_design_model_does_not_break_the_check(client, monkeypatch):
 
 def test_url_length_is_limited(client):
     assert client.post("/api/check-website", json={"url": "x" * 3000}).status_code == 422
+
+
+def test_a_page_stuck_on_its_loading_screen_is_called_out(repo):
+    found = titles(check(repo, {"stillLoading": True, "settled": False, "settleSeconds": 25.0}))
+    assert "[Website] Still on a loading screen" in found
+
+
+def test_a_slow_page_is_a_minor_note_and_a_fast_one_is_not(repo):
+    assert "[Website] Slow to show content" in titles(check(repo, {"settleSeconds": 9.0, "settled": True}))
+    assert titles(check(repo, {"settleSeconds": 1.2, "settled": True})) == []
+
+
+def test_websites_skip_the_slow_ai_second_opinion_but_keep_every_rule_check(repo):
+    class Counting(BaseProvider):
+        provider_name = "counting"
+        reviewed = 0
+        looked = 0
+
+        def review(self, *a, **k):
+            Counting.reviewed += 1
+            return ProviderResponse(provider_name="counting")
+
+        def understand_image(self, *a):
+            Counting.looked += 1
+            return None
+
+        def generate_rewrite(self, *a, **k):
+            Counting.rewrote = getattr(Counting, "rewrote", 0) + 1
+            return None
+
+    agent = CoordinatorAgent(repo, config=EngineConfig(), provider=Counting(), retriever=None)
+    shots = [ImageItem(alt_text="s", metadata={"base64": png_b64(), "skip_understanding": True}) for i in range(3)]
+    result = agent.run_review(DraftPayload(
+        draft_id="s", brand_id="nimbus_cloud", content_text="NimbusDB has 100% uptime.", images=shots,
+        metadata={"website_facts": CLEAN_FACTS}, answers={"website": "https://a.example/"},
+    ))
+    assert Counting.reviewed == 0 and Counting.looked == 0           # no AI second opinion on page text, no per-screenshot look
+    assert getattr(Counting, "rewrote", 0) == 0                      # and no AI rewrite of a whole website
+    assert {"terminology", "wrong_fact"} <= {f.category.value for f in result.findings}

@@ -253,7 +253,10 @@ class CoordinatorAgent:
             or isinstance(self.provider, RulesOnlyProvider)
             or self.provider.__class__.__name__ == "RulesOnlyProvider"
         )
-        if not is_rules_only and payload.has_text:
+        # A whole website's worth of text is too long for the AI's second opinion (slow, noisy);
+        # the rule checks above already cover it in full.
+        is_website = bool(payload.metadata.get("website_facts"))
+        if not is_rules_only and payload.has_text and not is_website:
             agents_executed.append("SemanticProvider")
             try:
                 review_kwargs = {}
@@ -327,7 +330,8 @@ class CoordinatorAgent:
             content_text=payload.content_text,
             findings=unique_findings,
             policy=policy,
-            provider=self.provider if not is_rules_only else None,
+            # No AI rewrite of a whole website (slow, and not a meaningful suggestion).
+            provider=self.provider if not (is_rules_only or is_website) else None,
         )
 
         # STRICT SAFETY CONTRACT: A rewrite agent must NEVER override a RED decision.
