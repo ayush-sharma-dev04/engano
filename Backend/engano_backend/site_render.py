@@ -9,9 +9,13 @@ hard time limit.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional
+
+import httpx
 
 from .safe_proxy import SafeProxy
 from .website import Resolver, SiteError, _check_public, _is_public, normalize_url, system_resolver
@@ -83,12 +87,56 @@ class RenderedSite:
     facts: Dict[str, Any] = field(default_factory=dict)
 
 
+def remote_renderer_url() -> str:
+    """Where the Docker renderer lives (ENGANO_RENDERER_URL), or '' to render in-process."""
+    return os.getenv("ENGANO_RENDERER_URL", "").strip().rstrip("/")
+
+
 def renderer_available() -> bool:
+    if remote_renderer_url():
+        return True
     try:
         import playwright  # noqa: F401
     except ImportError:
         return False
     return True
+
+
+async def _render_remote(base_url: str, url: str, client: Optional[httpx.AsyncClient] = None) -> RenderedSite:
+    """Ask the Docker renderer to open the page. Its answer is treated as untrusted data."""
+    headers = {"X-Renderer-Token": os.getenv("ENGANO_RENDERER_TOKEN", "")} if os.getenv("ENGANO_RENDERER_TOKEN") else {}
+    http = client or httpx.AsyncClient(timeout=httpx.Timeout(TOTAL_TIMEOUT_S + 15))
+    try:
+        resp = await http.post(f"{base_url}/render", json={"url": url}, headers=headers)
+    except httpx.ConnectError:
+        raise SiteError("the website checker isn't running (start it with `make renderer`)") from None
+    except httpx.TimeoutException:
+        raise SiteError("the site took too long to load") from None
+    except httpx.HTTPError:
+        raise SiteError("the website checker couldn't be reached") from None
+    finally:
+        if client is None:
+            await http.aclose()
+    if resp.status_code == 422:
+        try:
+            detail = str(resp.json().get("detail") or "")
+        except ValueError:
+            detail = ""
+        raise SiteError(detail[:200] or "the site couldn't be opened")
+    if resp.status_code != 200:
+        raise SiteError("the website checker failed")
+    try:
+        data = resp.json()
+        shots = [base64.b64decode(b, validate=True) for b in list(data["screenshots"])[:MAX_SCREENSHOTS]]
+        return RenderedSite(
+            final_url=str(data["final_url"])[:2048],
+            title=str(data.get("title") or "")[:300],
+            text=str(data.get("text") or "")[:MAX_TEXT_CHARS],
+            screenshots=shots,
+            facts=dict(data.get("facts") or {}),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise SiteError("the website checker gave an unreadable answer") from None
 
 
 async def render_site(
@@ -101,8 +149,11 @@ async def render_site(
     """Render a public web page. Raises SiteError with a message that is safe to show."""
     url = normalize_url(raw_url)
     await _check_public(url, resolve, is_public)  # fail fast with a friendly message; the proxy enforces it for real
+    remote = remote_renderer_url()
+    if remote:
+        return await _render_remote(remote, url)
     if not renderer_available():
-        raise SiteError("website rendering isn't installed on this server")
+        raise SiteError("website checks aren't set up on this server (run `make renderer`)")
     async with _SLOTS:
         try:
             return await asyncio.wait_for(_render(url, resolve, is_public, allowed_ports), TOTAL_TIMEOUT_S)
@@ -123,7 +174,13 @@ async def _render(url: str, resolve: Resolver, is_public: Callable[[str], bool],
                 browser = await pw.chromium.launch(
                     headless=True,
                     proxy={"server": f"http://127.0.0.1:{port}"},
-                    args=["--proxy-bypass-list=<-loopback>", "--disable-extensions", "--mute-audio"],
+                    args=[
+                        "--proxy-bypass-list=<-loopback>",
+                        "--disable-extensions",
+                        "--mute-audio",
+                        # Inside the Docker container the container itself is the sandbox.
+                        *(["--no-sandbox"] if os.getenv("ENGANO_RENDERER_NO_SANDBOX") == "1" else []),
+                    ],
                 )
             except PlaywrightError:
                 raise SiteError("the browser for website checks isn't installed on this server") from None

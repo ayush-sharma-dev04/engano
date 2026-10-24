@@ -13,7 +13,7 @@ OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen
 OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: help pull setup browser migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
+.PHONY: help pull setup renderer renderer-up migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -27,8 +27,21 @@ setup: ## Install the AI engine, backend and every channel into .venv
 	@test -d $(VENV) || uv venv $(VENV)
 	uv pip install -q --python $(PY) -r requirements.txt -e ./Backend $(foreach c,$(CHANNELS),-e ./$(c))
 
-browser: setup ## Install the browser used by website checks (one time, about 150 MB)
-	$(VENV)/bin/playwright install chromium
+RENDERER_IMAGE := engano-renderer
+RENDERER_PORT  ?= 8090
+RENDERER_URL   := $(shell sed -n 's/^ENGANO_RENDERER_URL=//p' .env 2>/dev/null)
+
+renderer: ## Build and start the website-check browser in Docker (listens on 127.0.0.1:8090 only)
+	docker build -q -f Renderer/Dockerfile -t $(RENDERER_IMAGE) .
+	-docker rm -f engano-renderer >/dev/null 2>&1
+	docker run -d --name engano-renderer --restart unless-stopped \
+		-p 127.0.0.1:$(RENDERER_PORT):8090 --init --shm-size=1g --memory=2g --pids-limit=512 \
+		--cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,size=512m -e HOME=/tmp \
+		$(RENDERER_IMAGE) >/dev/null
+	@echo "Renderer up on http://127.0.0.1:$(RENDERER_PORT). Put ENGANO_RENDERER_URL=http://127.0.0.1:$(RENDERER_PORT) in .env"
+
+renderer-up: ## Start the website-check browser if it already exists, else build it
+	@docker start engano-renderer >/dev/null 2>&1 || $(MAKE) --no-print-directory renderer
 
 migrate: setup ## Apply new supabase/migrations/*.sql to the database (needs SUPABASE_DB_URL in .env)
 	$(PY) supabase/migrate.py
@@ -42,6 +55,7 @@ seed: setup ## Load brand rules from data/brand_library/*.json into the database
 start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Discord, Gmail, tunnel + webhook (Ctrl+C stops all)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' INT TERM; \
 	if [ "$(AI_PROVIDER)" = ollama ]; then $(MAKE) --no-print-directory ollama & fi; \
+	if [ -n "$(RENDERER_URL)" ] && command -v docker >/dev/null; then $(MAKE) --no-print-directory renderer-up & fi; \
 	$(MAKE) --no-print-directory discord & \
 	$(MAKE) --no-print-directory backend & \
 	$(MAKE) --no-print-directory gmail & \
