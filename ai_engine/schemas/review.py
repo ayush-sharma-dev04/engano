@@ -59,6 +59,15 @@ class ReviewInput(DraftPayload):
     channel: ChannelType = Field(default=ChannelType.WEB_STUDIO, description="Originating channel")
 
 
+class ClarifyingQuestion(BaseModel):
+    """Something ENGANO needs from the creator before it can settle a review."""
+    id: str = Field(description="Stable id; the creator's answer is sent back under this key")
+    kind: str = Field(description="confirm_brand | website | evidence")
+    text: str
+    choices: List[str] = Field(default_factory=list, description="Fixed answers to pick from, if any")
+    about: Optional[str] = Field(default=None, description="The draft phrase this question is about")
+
+
 class ProcessingMetadata(BaseModel):
     """Execution metadata detailing providers and agents invoked."""
     provider_selected: str = Field(description="Provider executed: rules_only, gemini, ollama")
@@ -101,5 +110,9 @@ class ReviewResult(BaseModel):
     post_rewrite_decision: Optional[DecisionOutcome] = Field(
         default=None,
         description="Decision outcome for proposed rewrite",
+    )
+    questions: List[ClarifyingQuestion] = Field(
+        default_factory=list,
+        description="Open questions for the creator. Answer them and review again.",
     )
     metadata: ProcessingMetadata

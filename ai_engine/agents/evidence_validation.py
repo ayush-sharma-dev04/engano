@@ -118,6 +118,12 @@ class EvidenceValidationAgent:
                 validated.append(updated)
                 continue
 
+            # A rule already matched the creator's evidence to a permitted benchmark:
+            # keep that (needs reviewer verification), don't reset it to "unsupported".
+            if updated.evidence_status == EvidenceStatus.UNVERIFIED_PROVIDED:
+                validated.append(updated)
+                continue
+
             # If evidence was supplied by the creator
             if supplied_evidence:
                 evidence_str = str(supplied_evidence).lower()

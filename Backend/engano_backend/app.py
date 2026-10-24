@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.review import ReviewResult
@@ -22,17 +22,59 @@ from engano_whatsapp.router import build_router as build_whatsapp_router
 
 from .escalation import EscalationSettings
 from .review_service import ReviewService, ReviewSettings
+from .website import SiteError
 
 log = logging.getLogger("engano.backend")
 
 MAX_REVIEW_CHARS = 10_000
 
 
+MAX_IMAGES = 4
+MAX_IMAGE_B64_CHARS = 5_600_000  # about 4 MB of image
+
+
+class ReviewImage(BaseModel):
+    """One attached image: base64 file data plus the alt text the author wrote."""
+
+    data: str = Field(min_length=8, max_length=MAX_IMAGE_B64_CHARS)
+    alt_text: str | None = Field(default=None, max_length=1000)
+
+
 class ReviewRequest(BaseModel):
     """Body of POST /api/review. The brand is never taken from the client."""
 
-    text: str = Field(min_length=1, max_length=MAX_REVIEW_CHARS)
+    text: str = Field(default="", max_length=MAX_REVIEW_CHARS)
     draft_id: str | None = Field(default=None, max_length=100)
+    # Answers to ENGANO's earlier questions: question id -> answer.
+    answers: dict[str, str] = Field(default_factory=dict, max_length=12)
+    images: list[ReviewImage] = Field(default_factory=list, max_length=MAX_IMAGES)
+
+    @field_validator("answers")
+    @classmethod
+    def _limit_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(len(k) > 100 or len(v) > 2000 for k, v in value.items()):
+            raise ValueError("An answer is too long.")
+        return value
+
+    @model_validator(mode="after")
+    def _needs_something_to_review(self) -> "ReviewRequest":
+        if not self.text.strip() and not self.images:
+            raise ValueError("Add some text or an image to review.")
+        return self
+
+
+class SiteRequest(BaseModel):
+    url: str = Field(min_length=3, max_length=2048)
+
+
+class SiteCheckResponse(BaseModel):
+    url: str
+    title: str
+    screenshot: str
+    facts: dict
+    design_notes: list[str]
+    design_error: str | None
+    result: ReviewResult
 
 
 def _cors_origins() -> list[str]:
@@ -107,15 +149,28 @@ def create_app(
     @app.post("/api/review", response_model=ReviewResult)
     async def review(request: ReviewRequest):
         """Run the full multi-agent review on a draft for the configured brand."""
-        if not request.text.strip():
-            raise HTTPException(status_code=422, detail="Draft text is empty.")
         try:
             return await review_service.review_text(
-                request.draft_id or f"studio-{uuid.uuid4().hex[:12]}", request.text
+                request.draft_id or f"studio-{uuid.uuid4().hex[:12]}",
+                request.text,
+                answers=request.answers or None,
+                images=[(i.data, i.alt_text) for i in request.images] or None,
             )
         except Exception:
             log.exception("Review failed")
             raise HTTPException(status_code=503, detail="Review is unavailable. Try again shortly.")
+
+    @app.post("/api/check-website", response_model=SiteCheckResponse)
+    async def check_website(request: SiteRequest):
+        """Open a public website in a browser; review its text and look; suggest visual changes."""
+        try:
+            check = await review_service.check_website(request.url)
+        except SiteError as exc:
+            raise HTTPException(status_code=422, detail=f"Couldn't check that website: {exc}.")
+        except Exception:
+            log.exception("Website check failed")
+            raise HTTPException(status_code=503, detail="Website checks are unavailable. Try again shortly.")
+        return check
 
     # Brand Memory API Endpoints
     @app.get("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])

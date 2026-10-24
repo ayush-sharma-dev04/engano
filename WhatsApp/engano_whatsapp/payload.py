@@ -16,6 +16,7 @@ class IncomingMessage:
     kind: str  # "text", "image", or another Meta type we don't review
     text: str = ""  # message body, or the image caption
     has_image: bool = False
+    media_id: str = ""  # Meta media id of the image, used to download it
 
 
 def parse_messages(payload: dict[str, Any]) -> list[IncomingMessage]:
@@ -32,10 +33,12 @@ def parse_messages(payload: dict[str, Any]) -> list[IncomingMessage]:
                 continue
             for msg in value.get("messages") or []:
                 kind = msg.get("type", "unknown")
+                media_id = ""
                 if kind == "text":
                     text = (msg.get("text") or {}).get("body", "")
                 elif kind == "image":
                     text = (msg.get("image") or {}).get("caption", "")
+                    media_id = str((msg.get("image") or {}).get("id") or "")
                 else:
                     text = ""
                 messages.append(
@@ -46,6 +49,7 @@ def parse_messages(payload: dict[str, Any]) -> list[IncomingMessage]:
                         kind=kind,
                         text=text,
                         has_image=kind == "image",
+                        media_id=media_id,
                     )
                 )
     return messages

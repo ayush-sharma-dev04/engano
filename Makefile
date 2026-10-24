@@ -13,7 +13,7 @@ OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen
 OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: help pull setup migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
+.PHONY: help pull setup browser migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ CHANNELS := Discord WhatsApp Gmail LinkedIn
 setup: ## Install the AI engine, backend and every channel into .venv
 	@test -d $(VENV) || uv venv $(VENV)
 	uv pip install -q --python $(PY) -r requirements.txt -e ./Backend $(foreach c,$(CHANNELS),-e ./$(c))
+
+browser: setup ## Install the browser used by website checks (one time, about 150 MB)
+	$(VENV)/bin/playwright install chromium
 
 migrate: setup ## Apply new supabase/migrations/*.sql to the database (needs SUPABASE_DB_URL in .env)
 	$(PY) supabase/migrate.py

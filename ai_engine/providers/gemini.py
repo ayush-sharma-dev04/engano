@@ -257,3 +257,43 @@ class GeminiProvider(BaseProvider):
         if clean.endswith("```"):
             clean = clean[:-3].rstrip()
         return clean.strip() or None
+
+    def understand_image(self, image_b64, alt_text, width, height):
+        import base64
+
+        from google.genai import types
+
+        from ai_engine.vision.understand import build_prompt, parse_understanding
+
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type="image/png"),
+                    build_prompt(alt_text, width, height),
+                ],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+            )
+            return parse_understanding(resp.text or "")
+        except Exception:
+            raise RuntimeError("the vision model could not read this image") from None
+
+    def suggest_visual_changes(self, image_b64, width, height):
+        import base64
+
+        from google.genai import types
+
+        from ai_engine.vision.understand import build_design_prompt, parse_suggestions
+
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type="image/png"),
+                    build_design_prompt(width, height),
+                ],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+            )
+            return parse_suggestions(resp.text or "")
+        except Exception:
+            raise RuntimeError("the vision model could not review the design") from None

@@ -11,12 +11,31 @@ type ApiFinding = {
   explanation: string
   cited_source?: string | null
   suggested_fix?: string | null
+  image_index?: number | null
+  suggested_alt?: string | null
+}
+
+type ApiQuestion = {
+  id: string
+  kind: 'confirm_brand' | 'website' | 'evidence'
+  text: string
+  choices?: string[]
+  about?: string | null
 }
 
 type ApiResult = {
   decision: { status: 'GREEN' | 'YELLOW' | 'RED'; reason?: string | null; clarification_question?: string | null }
   findings: ApiFinding[]
   proposed_rewrite?: string | null
+  questions?: ApiQuestion[]
+}
+
+export type Question = {
+  id: string
+  kind: 'confirm_brand' | 'website' | 'evidence'
+  text: string
+  choices: string[]
+  about: string | null
 }
 
 export type ReviewSummary = {
@@ -24,6 +43,7 @@ export type ReviewSummary = {
   reason: string
   question: string | null
   rewrite: string | null
+  questions: Question[]
 }
 
 const SEVERITY: Record<ApiFinding['severity'], Finding['severity']> = {
@@ -46,13 +66,21 @@ const CATEGORY: Record<string, string> = {
   legal: 'Legal',
 }
 
-export async function reviewDraft(text: string): Promise<{ findings: Finding[]; summary: ReviewSummary }> {
+export async function reviewDraft(
+  text: string,
+  answers: Record<string, string> = {},
+  images: { data: string; alt_text: string }[] = []
+): Promise<{ findings: Finding[]; summary: ReviewSummary }> {
   let response: Response
   try {
     response = await fetch(`${API_URL}/api/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        text,
+        ...(Object.keys(answers).length ? { answers } : {}),
+        ...(images.length ? { images } : {}),
+      }),
     })
   } catch {
     throw new Error(`Could not reach the ENGANO backend at ${API_URL}. Is it running?`)
@@ -60,17 +88,22 @@ export async function reviewDraft(text: string): Promise<{ findings: Finding[]; 
   if (!response.ok) {
     throw new Error(response.status === 422 ? 'The draft is empty or too long (max 10,000 characters).' : 'The review service is unavailable. Try again shortly.')
   }
-  const data = (await response.json()) as ApiResult
+  return mapResult((await response.json()) as ApiResult)
+}
 
+function mapResult(data: ApiResult): { findings: Finding[]; summary: ReviewSummary } {
   const findings: Finding[] = data.findings.map((f) => {
     const fix = f.suggested_fix ?? null
     const append = fix && /^append required disclaimer/i.test(fix) ? fix.match(/'(.+)'\s*$/)?.[1] : undefined
     const literal = fix !== null && !append && !GUIDANCE.test(fix)
-    const hasSpan = !!f.highlighted_text && !append && f.highlighted_text.length < 400
+    const inImage = f.image_index != null
+    const onSite = f.highlighted_text.startsWith('[Website]')
+    const hasSpan = !!f.highlighted_text && !append && !inImage && !onSite && f.highlighted_text.length < 400
+    const shown = f.highlighted_text.replace(/^\[(Image \d+|Website)\]\s*/, '')
     return {
       severity: SEVERITY[f.severity] ?? 'Warning',
       category: CATEGORY[f.category] ?? f.category,
-      issue: f.highlighted_text ? `“${f.highlighted_text}”` : 'Review could not complete',
+      issue: onSite ? shown : inImage ? (shown ? `Image ${f.image_index} · “${shown}”` : `Image ${f.image_index}`) : f.highlighted_text ? `“${f.highlighted_text}”` : 'Review could not complete',
       explanation: f.explanation,
       guideline: f.cited_source ?? 'Brand policy',
       suggestion: fix ?? 'Ask a reviewer to check this section.',
@@ -78,6 +111,8 @@ export async function reviewDraft(text: string): Promise<{ findings: Finding[]; 
       start: hasSpan ? f.text_span?.start : undefined,
       replacement: hasSpan && literal ? fix : undefined,
       append,
+      imageIndex: f.image_index ?? undefined,
+      suggestedAlt: f.suggested_alt ?? undefined,
     }
   })
 
@@ -88,6 +123,64 @@ export async function reviewDraft(text: string): Promise<{ findings: Finding[]; 
       reason: data.decision.reason ?? '',
       question: data.decision.clarification_question ?? null,
       rewrite: data.proposed_rewrite ?? null,
+      questions: (data.questions ?? []).map((q) => ({
+        id: q.id,
+        kind: q.kind,
+        text: q.text,
+        choices: q.choices ?? [],
+        about: q.about ?? null,
+      })),
+    },
+  }
+}
+
+export type SiteInfo = {
+  url: string
+  title: string
+  screenshot: string
+  designNotes: string[]
+  designError: string | null
+  facts: Record<string, unknown>
+}
+
+export async function checkWebsite(url: string): Promise<{ findings: Finding[]; summary: ReviewSummary; site: SiteInfo }> {
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/api/check-website`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+  } catch {
+    throw new Error(`Could not reach the ENGANO backend at ${API_URL}. Is it running?`)
+  }
+  if (!response.ok) {
+    let detail = ''
+    try {
+      detail = ((await response.json()) as { detail?: unknown }).detail as string
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(response.status === 422 && typeof detail === 'string' ? detail : 'Website checks are unavailable. Try again shortly.')
+  }
+  const data = (await response.json()) as {
+    url: string
+    title: string
+    screenshot: string
+    facts: Record<string, unknown>
+    design_notes: string[]
+    design_error: string | null
+    result: ApiResult
+  }
+  return {
+    ...mapResult(data.result),
+    site: {
+      url: data.url,
+      title: data.title,
+      screenshot: data.screenshot,
+      designNotes: data.design_notes,
+      designError: data.design_error,
+      facts: data.facts,
     },
   }
 }

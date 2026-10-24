@@ -234,6 +234,54 @@ class OllamaProvider(BaseProvider):
 
         return _clean_rewrite_output(raw_text)
 
+    def understand_image(self, image_b64, alt_text, width, height):
+        from ai_engine.vision.understand import build_prompt, parse_understanding
+
+        payload = {
+            "model": self.model,
+            "prompt": build_prompt(alt_text, width, height),
+            "images": [image_b64],
+            "format": "json",
+            "stream": False,
+            "keep_alive": "1h",
+            "options": {"temperature": 0.0},
+        }
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/generate", json=payload, timeout=self.config.vision_timeout_seconds
+            )
+        except httpx.TimeoutException:
+            raise RuntimeError("the vision model took too long") from None
+        except httpx.HTTPError:
+            raise RuntimeError("the vision model could not be reached") from None
+        if resp.status_code != 200:
+            raise RuntimeError(f"the vision model returned HTTP {resp.status_code}")
+        try:
+            return parse_understanding(resp.json().get("response", ""))
+        except Exception:
+            raise RuntimeError("the vision model gave an unreadable answer") from None
+
+    def suggest_visual_changes(self, image_b64, width, height):
+        from ai_engine.vision.understand import build_design_prompt, parse_suggestions
+
+        payload = {
+            "model": self.model,
+            "prompt": build_design_prompt(width, height),
+            "images": [image_b64],
+            "format": "json",
+            "stream": False,
+            "keep_alive": "1h",
+            "options": {"temperature": 0.0},
+        }
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/generate", json=payload, timeout=self.config.vision_timeout_seconds
+            )
+            resp.raise_for_status()
+            return parse_suggestions(resp.json().get("response", ""))
+        except Exception:
+            raise RuntimeError("the vision model could not review the design") from None
+
 
 def _clean_rewrite_output(raw_text: str) -> Optional[str]:
     """Strip markdown fences/whitespace and return the proposed rewrite text."""

@@ -157,5 +157,13 @@
   ],
   "test_fixtures": {
     "sample_draft": "NimbusDB is the fastest database in the world, with 100% uptime. Try it free forever and see why teams love it!"
+  },
+  "logo_rules": {
+    "require_brand_logo": false,
+    "approved_partners": []
+  },
+  "visual_style": {
+    "fonts": [],
+    "colors": []
   }
 }

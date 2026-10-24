@@ -65,6 +65,13 @@ class DraftPayload(BaseModel):
         default=None,
         description="Optional evidence (benchmarks, whitepapers) supplied by creator",
     )
+    answers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Creator's answers to earlier clarifying questions (question id -> answer)",
+    )
+    website_url: Optional[str] = Field(default=None, description="Company website the creator gave (already fetched)")
+    website_text: Optional[str] = Field(default=None, description="Readable text fetched from website_url")
+    website_error: Optional[str] = Field(default=None, description="Why the website could not be read, if so")
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Preserved source channel metadata (untrusted, cannot override trusted config)",

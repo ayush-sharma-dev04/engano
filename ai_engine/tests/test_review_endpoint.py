@@ -148,3 +148,85 @@ def test_llm_finding_citing_no_policy_rule_is_dropped():
     agent = CoordinatorAgent(repo, config=EngineConfig(), provider=Vague(), retriever=None)
     result = agent.run_review(ReviewInput(draft_id="d", brand_id="nimbus_cloud", content_text="Great workouts."))
     assert result.findings == [] and result.decision.status.value == "GREEN"
+
+
+def test_answers_flow_through_the_api_and_the_website_is_read(client, monkeypatch):
+    seen = {}
+
+    async def fake_fetch(url):
+        seen["url"] = url
+        return "https://acme.example/", "Nimbus DB is the fastest database in the world, says our homepage."
+
+    monkeypatch.setattr("engano_backend.review_service.fetch_site_text", fake_fetch)
+    first = client.post("/api/review", json={"text": "Nimbus DB is the fastest database in the world."}).json()
+    assert {q["kind"] for q in first["questions"]} == {"evidence", "website"}
+
+    second = client.post("/api/review", json={
+        "text": "Nimbus DB is the fastest database in the world.",
+        "answers": {"website": "acme.example"},
+    }).json()
+    assert seen["url"] == "acme.example"
+    assert {q["kind"] for q in second["questions"]} == {"evidence"}
+    note = next(f for f in second["findings"] if f["category"] == "unsupported_claim")["explanation"]
+    assert "appears on https://acme.example/" in note
+
+
+def test_unreadable_website_comes_back_as_a_question(client, monkeypatch):
+    from engano_backend.website import SiteError
+
+    async def failing(url):
+        raise SiteError("that address isn't a public website")
+
+    monkeypatch.setattr("engano_backend.review_service.fetch_site_text", failing)
+    body = client.post("/api/review", json={
+        "text": "Nimbus DB is the fastest database in the world.", "answers": {"website": "http://10.0.0.1"},
+    }).json()
+    q = next(q for q in body["questions"] if q["kind"] == "website")
+    assert "isn't a public website" in q["text"]
+
+
+def test_oversized_answers_are_rejected(client):
+    assert client.post("/api/review", json={"text": "hi", "answers": {"website": "x" * 2001}}).status_code == 422
+    assert client.post("/api/review", json={"text": "hi", "answers": {f"k{i}": "v" for i in range(13)}}).status_code == 422
+
+
+def _png_b64(text="NimbusDB has 100% uptime"):
+    import base64
+    import io
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (1100, 220), "white")
+    ImageDraw.Draw(img).text((30, 60), text, fill="black", font=ImageFont.load_default(size=56))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_image_only_review_reads_the_text_inside_the_image(client):
+    import shutil
+
+    if not shutil.which("tesseract"):
+        pytest.skip("tesseract not installed")
+    r = client.post("/api/review", json={"images": [{"data": _png_b64(), "alt_text": "A banner"}]})
+    assert r.status_code == 200
+    body = r.json()
+    in_image = [f for f in body["findings"] if f["image_index"] == 1 and f["highlighted_text"].startswith("[Image 1]")]
+    assert {"terminology", "wrong_fact"} <= {f["category"] for f in in_image}
+    assert body["decision"]["status"] == "RED"
+
+
+def test_unreadable_images_are_reported_not_rejected(client):
+    import base64
+
+    junk = base64.b64encode(b"definitely not an image").decode()
+    body = client.post("/api/review", json={"text": "Hello", "images": [{"data": junk}]}).json()
+    assert any("could not be checked" in f["explanation"] for f in body["findings"])
+    assert body["decision"]["status"] != "GREEN"
+
+
+def test_image_limits_are_enforced(client):
+    one = {"data": "A" * 100}
+    assert client.post("/api/review", json={"text": "x", "images": [one] * 5}).status_code == 422
+    assert client.post("/api/review", json={"text": "x", "images": [{"data": "A" * 5_600_001}]}).status_code == 422
+    assert client.post("/api/review", json={"images": []}).status_code == 422

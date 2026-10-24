@@ -5,6 +5,7 @@ POST receives messages: verify the signature, acknowledge at once (Meta retries
 slow webhooks), then review and reply in a background task.
 """
 
+import base64
 import hmac
 import json
 import logging
@@ -92,6 +93,12 @@ def build_router(
                 return
 
             payload = review_service.build_payload("whatsapp", msg)
+            if msg.has_image and msg.media_id and payload.images:
+                try:
+                    data = await client.download_media(msg.media_id)
+                    payload.images[0].metadata["base64"] = base64.b64encode(data).decode()
+                except Exception as exc:  # fall back to the accessibility-only check
+                    log.warning("Couldn't download image for %s: %s", msg.message_id, exc)
             draft_id = payload.draft_id
             try:
                 result = await review_service.review_payload(payload)

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import Finding
 from ai_engine.schemas.payload import ImageItem
+from ai_engine.schemas.vision import ImageUnderstanding
 
 
 class ProviderResponse(BaseModel):
@@ -53,5 +54,26 @@ class BaseProvider(ABC):
         (so RewriteAgent falls back to deterministic mechanical fixes).
         The base implementation is a no-op; rules-only and non-LLM providers need
         not override.
+        """
+        return None
+
+
+    def understand_image(
+        self,
+        image_b64: str,
+        alt_text: Optional[str],
+        width: int,
+        height: int,
+    ) -> Optional[ImageUnderstanding]:
+        """Look at one image (PNG, base64) and say what it shows.
+
+        None means this provider cannot look at images (e.g. rules-only).
+        """
+        return None
+
+    def suggest_visual_changes(self, image_b64: str, width: int, height: int) -> Optional[List[str]]:
+        """Look at a website screenshot and suggest visual design changes.
+
+        None means this provider cannot look at images (e.g. rules-only).
         """
         return None

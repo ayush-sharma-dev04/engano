@@ -116,6 +116,14 @@ class EngineConfig(BaseSettings):
         description="Gemini embedding model; output is truncated to 768 dims to match pgvector"
     )
 
+    # Image analysis
+    vision_timeout_seconds: float = Field(
+        default=180.0,
+        alias="ENGANO_VISION_TIMEOUT",
+        description="Seconds to wait for the vision model to look at one image"
+    )
+    max_images: int = Field(default=4, alias="ENGANO_MAX_IMAGES", ge=1, le=10)
+
     # Execution and Review Parameters
     request_timeout_seconds: float = Field(
         default=120.0,

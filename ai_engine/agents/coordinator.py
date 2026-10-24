@@ -35,6 +35,15 @@ from ai_engine.integrations.supabase_policy_repository import BasePolicyReposito
 from ai_engine.providers.base import BaseProvider
 from ai_engine.providers.factory import RulesOnlyProvider, get_provider
 from ai_engine.memory.store import get_brand_memory_store
+from ai_engine.vision.analyzer import ImageAnalyzer, has_image_data
+from ai_engine.vision.specialist import ImageAnalysisSpecialist
+from ai_engine.vision.website import WebsiteSpecialist
+from ai_engine.agents.questions import (
+    BRAND_QUESTION_ID,
+    QuestionAgent,
+    said_no_to_brand,
+    website_notes,
+)
 from ai_engine.rag.retriever import Retriever, get_retriever
 from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.brand_policy import BrandPolicy
@@ -84,6 +93,10 @@ class CoordinatorAgent:
         self.aggregator = FindingAggregator()
         self.decision_agent = DecisionAgent(strict_mode=self.config.strict_mode)
         self.rewrite_agent = RewriteAgent()
+        self.question_agent = QuestionAgent()
+        self.image_analyzer = ImageAnalyzer(self.provider)
+        self.image_specialist = ImageAnalysisSpecialist()
+        self.website_specialist = WebsiteSpecialist()
 
         # Specialists
         self.rules_specialist = RulesSpecialist()
@@ -186,6 +199,17 @@ class CoordinatorAgent:
             logger.error("RulesSpecialist failed: %s", exc)
             all_raw_findings.append(self._create_failure_finding("RulesSpecialist", exc))
 
+        # Look at the images first: the visual checks below read what is measured here.
+        has_pictures = any(has_image_data(i) for i in payload.images)
+        if has_pictures:
+            agents_executed.append("ImageAnalyzer")
+            try:
+                payload = self.image_analyzer.enrich(payload, policy)
+            except Exception as exc:
+                logger.error("ImageAnalyzer failed: %s", exc)
+                all_raw_findings.append(self._create_failure_finding("ImageAnalyzer", exc))
+                has_pictures = False
+
         # Select secondary specialists based on payload contents
         concurrent_specialists: List[BaseSpecialist] = []
 
@@ -200,6 +224,10 @@ class CoordinatorAgent:
         # Visual specialist runs when images or visual metadata exist
         if payload.has_images_or_visuals:
             concurrent_specialists.append(self.visual_specialist)
+        if has_pictures:
+            concurrent_specialists.append(self.image_specialist)
+        if payload.metadata.get("website_facts"):
+            concurrent_specialists.append(self.website_specialist)
 
         # Run independent specialists concurrently where safe
         if concurrent_specialists:
@@ -237,7 +265,7 @@ class CoordinatorAgent:
                     content_text=payload.content_text,
                     policy=policy,
                     deterministic_findings=all_raw_findings,
-                    images=payload.images,
+                    images=None if has_pictures else payload.images,
                     **review_kwargs,
                 )
                 all_raw_findings.extend(self._vet_provider_findings(resp.findings, payload.content_text, policy))
@@ -267,11 +295,31 @@ class CoordinatorAgent:
 
         # 6. Finding Aggregation and Span Alignment
         agents_executed.append("FindingAggregator")
-        unique_findings = self.aggregator.aggregate(validated_findings, payload.content_text)
+        unique_findings = website_notes(
+            self.aggregator.aggregate(validated_findings, payload.content_text), payload
+        )
+
+        # The creator said this draft is for a different brand: a person must decide.
+        if said_no_to_brand(payload.answers):
+            unique_findings.append(self._wrong_brand_finding(policy))
+
+        # 6b. Ask for what is missing instead of guessing
+        agents_executed.append("QuestionAgent")
+        questions = self.question_agent.generate(payload, policy, unique_findings)
 
         # 7. Decision Routing (Precedence: RED > YELLOW > GREEN, strict mode)
         agents_executed.append("DecisionRouting")
         decision = self.decision_agent.evaluate(unique_findings)
+        if questions and decision.status == ReviewDecision.GREEN:
+            # Not sure yet: never report "ready to publish" while questions are open.
+            decision = DecisionOutcome(
+                status=ReviewDecision.YELLOW,
+                action_required_by=ActionRequiredBy.CREATOR_QUESTION,
+                clarification_question=questions[0].text,
+                reason="Review pending: ENGANO needs a little more information.",
+            )
+        elif questions and not decision.clarification_question:
+            decision.clarification_question = questions[0].text
 
         # 8. Safe Rewrite Agent with Post-Rewrite Revalidation
         agents_executed.append("RewriteAgent")
@@ -315,6 +363,7 @@ class CoordinatorAgent:
             proposed_rewrite=rewrite_proposal.proposed_text,
             original_text=payload.content_text,
             rewrite_proposal=rewrite_proposal,
+            questions=questions,
             post_rewrite_findings=post_rewrite_all_findings,
             post_rewrite_decision=post_rewrite_decision,
             metadata=ProcessingMetadata(
@@ -367,6 +416,24 @@ class CoordinatorAgent:
         except Exception as exc:
             logger.warning("RAG retrieval skipped: %s", exc)
             return []
+
+    @staticmethod
+    def _wrong_brand_finding(policy: BrandPolicy) -> Finding:
+        return Finding(
+            finding_id="wrong_brand",
+            category=FindingCategory.LEGAL,
+            severity=FindingSeverity.HIGH,
+            highlighted_text="",
+            text_span=TextSpan(start=0, end=0),
+            explanation=(
+                f"The creator said this draft is not for {policy.brand_name}, so it cannot be checked "
+                "against this brand's policy. A reviewer must decide."
+            ),
+            evidence_status=EvidenceStatus.UNSUPPORTED,
+            cited_source="Brand confirmation",
+            suggested_fix=None,
+            human_review_required=True,
+        )
 
     def _create_failure_finding(self, specialist_name: str, error: Exception) -> Finding:
         """Create high-severity finding for specialist failure to prevent false compliance passes."""

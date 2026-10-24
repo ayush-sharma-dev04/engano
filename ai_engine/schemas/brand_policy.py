@@ -86,6 +86,20 @@ class LegalRule(BaseModel):
     trigger_phrases: List[str] = Field(default_factory=list)
 
 
+class LogoRules(BaseModel):
+    """What the brand expects to see (and not see) in images."""
+    require_brand_logo: bool = False
+    # Other companies whose logos may appear (partners, sponsors). Any other mark is flagged.
+    approved_partners: List[str] = Field(default_factory=list)
+
+
+class VisualStyle(BaseModel):
+    """The brand's look: fonts and colours a website or design should stay within."""
+    fonts: List[str] = Field(default_factory=list)
+    # Hex colours such as "#1E3CC8".
+    colors: List[str] = Field(default_factory=list)
+
+
 class BrandPolicy(BaseModel):
     """Authoritative brand policy loaded into the review engine."""
     brand_id: str
@@ -98,4 +112,6 @@ class BrandPolicy(BaseModel):
     tone_rules: List[ToneRule] = Field(default_factory=list)
     accessibility_rules: AccessibilityRules = Field(default_factory=AccessibilityRules)
     legal_rules: List[LegalRule] = Field(default_factory=list)
+    logo_rules: LogoRules = Field(default_factory=LogoRules)
+    visual_style: VisualStyle = Field(default_factory=VisualStyle)
     test_fixtures: Optional[Dict[str, Any]] = None

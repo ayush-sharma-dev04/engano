@@ -70,7 +70,10 @@ def render_result(result: ReviewResult, original_text: str, had_image: bool = Fa
             rewrite += f"\n_{note}_"
         parts.append(rewrite)
     if had_image:
-        parts.append("_Image: accessibility was checked. What's inside the image isn't analysed yet._")
+        if "ImageAnalyzer" in result.metadata.agents_executed:
+            parts.append("_Image: the text in it, its contrast and any logos were checked._")
+        else:
+            parts.append("_Image: only accessibility was checked. I couldn't open the image itself._")
     parts.append(f"_Brand: {result.brand_id} · ref {result.draft_id}_")
 
     body = "\n\n".join(parts)

@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { reviewDraft, type ReviewSummary } from './api'
+import { checkWebsite, reviewDraft, type ReviewSummary, type SiteInfo } from './api'
 import { Icon } from './ui'
 import StudioChat from './components/StudioChat'
 import { locate } from './suggestions'
+import { problemWith, readImage, type AttachedImage } from './images'
 import BrandGuidelines from './components/BrandGuidelines'
 import ReviewQueue, {
   type ReviewSubmission,
@@ -23,6 +24,9 @@ export type Finding = {
   start?: number
   replacement?: string
   append?: string
+  // Set when the finding is about an attached image (1-based).
+  imageIndex?: number
+  suggestedAlt?: string
 }
 
 export type Guideline = {
@@ -42,6 +46,12 @@ function App() {
   const [content, setContent] = useState('')
 
   const [findings, setFindings] = useState<Finding[]>([])
+  const [siteMode, setSiteMode] = useState(false)
+  const [siteUrl, setSiteUrl] = useState('')
+  const [site, setSite] = useState<SiteInfo | null>(null)
+  const [images, setImages] = useState<AttachedImage[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [reviewStarted, setReviewStarted] = useState(false)
   const [hidden, setHidden] = useState<Set<number>>(new Set())
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
@@ -69,7 +79,7 @@ function App() {
   // RUN ENGANO REVIEW
   // ==========================================
 
-  const runReview = async () => {
+  const review = async (current: Record<string, string>) => {
     setIsReviewing(true)
     setReviewStarted(true)
     setReviewError(null)
@@ -79,7 +89,11 @@ function App() {
 
     try {
       // The real review: all ENGANO agents run on the backend.
-      const { findings: apiFindings, summary } = await reviewDraft(content)
+      const { findings: apiFindings, summary } = await reviewDraft(
+        content,
+        current,
+        images.map((image) => ({ data: image.data, alt_text: image.alt }))
+      )
       const newFindings: Finding[] = [...apiFindings]
 
       // Custom DO / DON'T rules from the Brand Library are still checked in the browser.
@@ -118,7 +132,7 @@ function App() {
       }
     })
 
-      if (newFindings.length === 0) {
+      if (newFindings.length === 0 && summary.questions.length === 0) {
         newFindings.push({
           severity: 'Suggestion',
           category: 'Brand Check',
@@ -138,6 +152,64 @@ function App() {
     } finally {
       setIsReviewing(false)
     }
+  }
+
+  // ==========================================
+  // ATTACHED IMAGES
+  // ==========================================
+
+  const addImages = async (files: File[]) => {
+    setAttachError(null)
+    let count = images.length
+    const added: AttachedImage[] = []
+    for (const file of files) {
+      const problem = problemWith(file, count)
+      if (problem) {
+        setAttachError(problem)
+        continue
+      }
+      try {
+        added.push(await readImage(file))
+        count += 1
+      } catch (error) {
+        setAttachError(error instanceof Error ? error.message : 'Could not read that image.')
+      }
+    }
+    if (added.length) setImages((current) => [...current, ...added])
+  }
+
+  const removeImage = (id: string) => setImages((current) => current.filter((image) => image.id !== id))
+
+  const setAlt = (id: string, alt: string) =>
+    setImages((current) => current.map((image) => (image.id === id ? { ...image, alt } : image)))
+
+  // Open the website in a browser and review what it says and how it looks.
+  const checkSite = async () => {
+    setIsReviewing(true)
+    setReviewStarted(true)
+    setReviewError(null)
+    setReviewSummary(null)
+    try {
+      const result = await checkWebsite(siteUrl.trim())
+      setHidden(new Set())
+      setFindings(result.findings)
+      setReviewSummary(result.summary)
+      setSite(result.site)
+    } catch (error) {
+      setFindings([])
+      setReviewError(error instanceof Error ? error.message : 'The website check failed.')
+    } finally {
+      setIsReviewing(false)
+    }
+  }
+
+  const runReview = () => (site || siteMode ? checkSite() : review(answers))
+
+  // The creator answered ENGANO's questions: keep the answers and check the draft again.
+  const answerQuestions = (given: Record<string, string>) => {
+    const merged = { ...answers, ...given }
+    setAnswers(merged)
+    return review(merged)
   }
 
   // ==========================================
@@ -195,6 +267,12 @@ function App() {
     setContent('')
     setFindings([])
     setHidden(new Set())
+    setAnswers({})
+    setImages([])
+    setSite(null)
+    setSiteMode(false)
+    setSiteUrl('')
+    setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
     setReviewError(null)
@@ -210,6 +288,12 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setAnswers({})
+    setImages([])
+    setSite(null)
+    setSiteMode(false)
+    setSiteUrl('')
+    setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
     setReviewError(null)
@@ -220,14 +304,14 @@ function App() {
   // ==========================================
 
   const submitForReview = () => {
-    if (content.trim() === '') {
+    if (content.trim() === '' && !site) {
       return
     }
 
     const submission: ReviewSubmission = {
       id: Date.now(),
       title: draftTitle.trim() || 'Untitled Draft',
-      content: content.trim(),
+      content: content.trim() || (site ? `Website check: ${site.url}` : ''),
       findings: findings.filter((_, index) => !hidden.has(index)),
       status: 'Pending Review',
       submittedAt: 'just now',
@@ -242,6 +326,12 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setAnswers({})
+    setImages([])
+    setSite(null)
+    setSiteMode(false)
+    setSiteUrl('')
+    setAttachError(null)
     setReviewStarted(false)
     setReviewSummary(null)
 
@@ -573,6 +663,18 @@ function App() {
                   summary={reviewSummary}
                   error={reviewError}
                   onRun={runReview}
+                  answers={answers}
+                  siteMode={siteMode}
+                  onSiteMode={setSiteMode}
+                  siteUrl={siteUrl}
+                  onSiteUrl={setSiteUrl}
+                  site={site}
+                  images={images}
+                  attachError={attachError}
+                  onAddImages={addImages}
+                  onRemoveImage={removeImage}
+                  onAlt={setAlt}
+                  onAnswer={answerQuestions}
                   onCancel={cancelDraft}
                   onSubmit={submitForReview}
                 />

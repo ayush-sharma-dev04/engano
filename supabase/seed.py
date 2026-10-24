@@ -26,7 +26,7 @@ from ai_engine.schemas.brand_policy import BrandPolicy  # noqa: E402
 LIBRARY = ROOT / "data" / "brand_library"
 JSON_COLUMNS = (
     "approved_terminology", "claims_policy", "factual_rules", "offers",
-    "tone_rules", "accessibility_rules", "legal_rules",
+    "tone_rules", "accessibility_rules", "legal_rules", "logo_rules", "visual_style",
 )
 
 
