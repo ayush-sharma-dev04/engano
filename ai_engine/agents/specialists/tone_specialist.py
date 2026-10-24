@@ -75,7 +75,10 @@ class ToneSpecialist(BaseSpecialist):
                                 ),
                                 evidence_status=EvidenceStatus.VERIFIED,
                                 cited_source=rule_ref,
-                                suggested_fix="Rephrase in a clear, professional, and objective brand voice.",
+                                suggested_fix=(
+                                    "!" if set(matched) == {"!"}
+                                    else "Rephrase in a clear, professional, and objective brand voice."
+                                ),
                                 human_review_required=False,
                             )
                         )

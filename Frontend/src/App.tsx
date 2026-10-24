@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { reviewDraft, type ReviewSummary } from './api'
 import BrandGuidelines from './components/BrandGuidelines'
 import ReviewQueue, {
   type ReviewSubmission,
@@ -32,6 +33,8 @@ function App() {
   const [content, setContent] = useState('')
 
   const [findings, setFindings] = useState<Finding[]>([])
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   // ==========================================
   // SHARED BRAND LIBRARY
@@ -55,94 +58,19 @@ function App() {
   // RUN ENGANO REVIEW
   // ==========================================
 
-  const runReview = () => {
+  const runReview = async () => {
     setIsReviewing(true)
-
-    const newFindings: Finding[] = []
+    setReviewError(null)
+    setReviewSummary(null)
 
     const lowerContent = content.toLowerCase()
 
-    // ==========================================
-    // BUILT-IN DEMONSTRATION RULES
-    // ==========================================
+    try {
+      // The real review: all ENGANO agents run on the backend.
+      const { findings: apiFindings, summary } = await reviewDraft(content)
+      const newFindings: Finding[] = [...apiFindings]
 
-    // Check 1: Unsupported superlative claims
-    if (
-      lowerContent.includes('fastest') ||
-      lowerContent.includes('best in the world') ||
-      lowerContent.includes('#1')
-    ) {
-      newFindings.push({
-        severity: 'Critical',
-        category: 'Unsupported Claim',
-        issue: 'Potential unsupported promotional claim',
-        explanation:
-          'The content contains a strong promotional claim that may require an approved source or benchmark.',
-        guideline:
-          'Avoid superlative claims unless they are supported by an approved source.',
-        suggestion:
-          'Replace the claim with a factual statement that can be verified.',
-      })
-    }
-
-    // Check 2: Free forever
-    if (
-      lowerContent.includes('free forever') ||
-      lowerContent.includes('100% free')
-    ) {
-      newFindings.push({
-        severity: 'Warning',
-        category: 'Promotional Language',
-        issue: 'Potentially misleading promotional wording',
-        explanation:
-          'This wording may create a stronger promise than the approved product information supports.',
-        guideline:
-          'Do not make promotional promises that are not present in the approved product information.',
-        suggestion:
-          'Use the exact approved pricing or offer language instead.',
-      })
-    }
-
-    // Check 3: Terminology
-    if (
-      lowerContent.includes('nimbusdb') ||
-      lowerContent.includes('nimbus database')
-    ) {
-      newFindings.push({
-        severity: 'Warning',
-        category: 'Terminology',
-        issue: 'Non-approved product terminology',
-        explanation:
-          'The product name does not match the preferred terminology stored in the Brand Library.',
-        guideline:
-          'Use the approved product name: "Nimbus DB".',
-        suggestion:
-          'Replace the incorrect product name with "Nimbus DB".',
-      })
-    }
-
-    // Check 4: Guaranteed language
-    if (
-      lowerContent.includes('guaranteed') ||
-      lowerContent.includes('guarantee')
-    ) {
-      newFindings.push({
-        severity: 'Warning',
-        category: 'Claims',
-        issue: 'Guarantee language detected',
-        explanation:
-          'Guarantee-based language can create a claim that requires explicit approval or supporting evidence.',
-        guideline:
-          'Avoid guarantees unless they are explicitly approved.',
-        suggestion:
-          'Rewrite the statement as a factual product capability.',
-      })
-    }
-
-    // ==========================================
-    // CUSTOM BRAND GUIDELINES
-    // ==========================================
-
+      // Custom DO / DON'T rules from the Brand Library are still checked in the browser.
     guidelines.forEach((guideline) => {
       const guidelineWords = guideline.text
         .toLowerCase()
@@ -178,26 +106,25 @@ function App() {
       }
     })
 
-    // ==========================================
-    // NO ISSUES
-    // ==========================================
+      if (newFindings.length === 0) {
+        newFindings.push({
+          severity: 'Suggestion',
+          category: 'Brand Check',
+          issue: 'No issues detected',
+          explanation: 'All ENGANO agents passed this draft against the brand policy.',
+          guideline: 'Brand policy',
+          suggestion: 'Content can proceed to human review.',
+        })
+      }
 
-    if (newFindings.length === 0) {
-      newFindings.push({
-        severity: 'Suggestion',
-        category: 'Brand Check',
-        issue: 'No major issues detected',
-        explanation:
-          'ENGANO did not detect any of the currently configured demonstration rules or brand guideline conflicts in this content.',
-        guideline:
-          'Continue following the approved brand guidelines and source material.',
-        suggestion:
-          'Content can proceed to human review.',
-      })
+      setFindings(newFindings)
+      setReviewSummary(summary)
+    } catch (error) {
+      setFindings([])
+      setReviewError(error instanceof Error ? error.message : 'Review failed.')
+    } finally {
+      setIsReviewing(false)
     }
-
-    setFindings(newFindings)
-    setIsReviewing(false)
   }
 
   // ==========================================
@@ -208,6 +135,8 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setReviewSummary(null)
+    setReviewError(null)
     setIsCreatingDraft(true)
   }
 
@@ -627,6 +556,56 @@ function App() {
                     </div>
 
                   </div>
+
+                  {/* Backend error */}
+                  {reviewError && (
+                    <div className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+                      {reviewError}
+                    </div>
+                  )}
+
+                  {/* Decision + suggested rewrite */}
+                  {reviewSummary && (
+                    <div
+                      className={`mt-6 rounded-xl border p-5 ${
+                        reviewSummary.status === 'RED'
+                          ? 'border-red-500/40 bg-red-500/10'
+                          : reviewSummary.status === 'YELLOW'
+                            ? 'border-yellow-400/40 bg-yellow-400/10'
+                            : 'border-emerald-500/40 bg-emerald-500/10'
+                      }`}
+                    >
+                      <h2 className="text-lg font-semibold">
+                        {reviewSummary.status === 'RED'
+                          ? 'Needs reviewer approval'
+                          : reviewSummary.status === 'YELLOW'
+                            ? 'Needs your input'
+                            : 'Ready to publish'}
+                      </h2>
+                      {reviewSummary.reason && (
+                        <p className="mt-1 text-sm text-slate-300">{reviewSummary.reason}</p>
+                      )}
+                      {reviewSummary.question && (
+                        <p className="mt-2 text-sm text-slate-300">{reviewSummary.question}</p>
+                      )}
+                      {reviewSummary.rewrite && (
+                        <div className="mt-4">
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            Suggested rewrite
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-sm text-slate-200">
+                            {reviewSummary.rewrite}
+                          </p>
+                          <button
+                            onClick={() => setContent(reviewSummary.rewrite ?? '')}
+                            className="mt-2 text-sm font-medium text-emerald-400 hover:text-emerald-300"
+                          >
+                            Use this rewrite
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Review Results */}
                   {findings.length > 0 && (

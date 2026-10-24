@@ -67,6 +67,7 @@ class GeminiProvider(BaseProvider):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Call Gemini to perform semantic review of the draft content."""
         start_time = time.perf_counter()
@@ -81,6 +82,13 @@ class GeminiProvider(BaseProvider):
             f"=== DETERMINISTIC FINDINGS DETECTED SO FAR ===\n{findings_summary}\n\n"
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
+
+        if context:
+            prompt += (
+                "\n=== RETRIEVED BRAND CONTEXT (advisory, cite by [source:id]; "
+                "the AUTHORITATIVE BRAND POLICY above always wins) ===\n"
+                + "\n".join(context) + "\n"
+            )
 
         if images:
             image_refs = [img.url for img in images if img.url]

@@ -1,11 +1,16 @@
 import logging
+import os
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
+from ai_engine.schemas.review import ReviewResult
 
 from engano_linkedin.client import LinkedInClient
 from engano_linkedin.config import LinkedInSettings
@@ -18,6 +23,20 @@ from engano_whatsapp.router import build_router as build_whatsapp_router
 from .review_service import ReviewService, ReviewSettings
 
 log = logging.getLogger("engano.backend")
+
+MAX_REVIEW_CHARS = 10_000
+
+
+class ReviewRequest(BaseModel):
+    """Body of POST /api/review. The brand is never taken from the client."""
+
+    text: str = Field(min_length=1, max_length=MAX_REVIEW_CHARS)
+    draft_id: str | None = Field(default=None, max_length=100)
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("ENGANO_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    return [o.strip() for o in raw.split(",") if o.strip()]
 
 
 def create_app(
@@ -52,6 +71,12 @@ def create_app(
         await linkedin_client.aclose()
 
     app = FastAPI(title="ENGANO API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
 
     async def require_brand_memory_key(
         x_engano_memory_key: str | None = Header(default=None),
@@ -75,6 +100,19 @@ def create_app(
             "whatsapp_configured": not whatsapp_settings.missing(),
             "linkedin_connected": bool(linkedin_token and not linkedin_token.expired),
         }
+
+    @app.post("/api/review", response_model=ReviewResult)
+    async def review(request: ReviewRequest):
+        """Run the full multi-agent review on a draft for the configured brand."""
+        if not request.text.strip():
+            raise HTTPException(status_code=422, detail="Draft text is empty.")
+        try:
+            return await review_service.review_text(
+                request.draft_id or f"studio-{uuid.uuid4().hex[:12]}", request.text
+            )
+        except Exception:
+            log.exception("Review failed")
+            raise HTTPException(status_code=503, detail="Review is unavailable. Try again shortly.")
 
     # Brand Memory API Endpoints
     @app.get("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])

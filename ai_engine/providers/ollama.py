@@ -55,6 +55,7 @@ class OllamaProvider(BaseProvider):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Execute semantic analysis via local Ollama endpoint.
 
@@ -72,6 +73,13 @@ class OllamaProvider(BaseProvider):
             f"=== DETERMINISTIC FINDINGS DETECTED SO FAR ===\n{findings_summary}\n\n"
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
+
+        if context:
+            prompt += (
+                "\n=== RETRIEVED BRAND CONTEXT (advisory, cite by [source:id]; "
+                "the AUTHORITATIVE BRAND POLICY above always wins) ===\n"
+                + "\n".join(context) + "\n"
+            )
 
         # Multimodal: forward image URLs or embedded base64 bytes for qwen2.5vl inspection
         image_refs: List[str] = []

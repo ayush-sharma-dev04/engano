@@ -31,6 +31,7 @@ class BaseProvider(ABC):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Perform semantic review of draft content against authoritative policy.
 

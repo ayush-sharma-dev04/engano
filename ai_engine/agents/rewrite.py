@@ -230,6 +230,11 @@ class RewriteAgent:
             if fix and any(fix.lower().startswith(p) for p in _GUIDANCE_PREFIXES):
                 continue
 
+            # A retired offer's replacement is a noun phrase that rarely fits the sentence
+            # grammatically, so leave it for the reviewer instead of splicing it in.
+            if f.category == FindingCategory.OUTDATED_OFFER:
+                continue
+
             # An empty suggested_fix means "delete this span".
             replacement = fix if fix else ""
             current_text = current_text[:start] + replacement + current_text[end:]

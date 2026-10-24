@@ -35,6 +35,7 @@ from ai_engine.integrations.supabase_policy_repository import BasePolicyReposito
 from ai_engine.providers.base import BaseProvider
 from ai_engine.providers.factory import RulesOnlyProvider, get_provider
 from ai_engine.memory.store import get_brand_memory_store
+from ai_engine.rag.retriever import Retriever, get_retriever
 from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import (
@@ -70,11 +71,13 @@ class CoordinatorAgent:
         config: Optional[EngineConfig] = None,
         provider: Optional[BaseProvider] = None,
         brand_memory: Optional[BrandMemory] = None,
+        retriever: Optional[Retriever] = None,
     ) -> None:
         self.repository = repository
         self.config = config or get_engine_config()
         self.provider = provider or get_provider(config=self.config)
         self.brand_memory = brand_memory
+        self.retriever = retriever if retriever is not None else get_retriever(self.config)
 
         self.policy_agent = PolicyAnalysisAgent()
         self.evidence_agent = EvidenceValidationAgent()
@@ -225,11 +228,17 @@ class CoordinatorAgent:
         if not is_rules_only and payload.has_text:
             agents_executed.append("SemanticProvider")
             try:
+                review_kwargs = {}
+                context = self._retrieve_context(payload)
+                if context:
+                    agents_executed.append("RAGRetriever")
+                    review_kwargs["context"] = context
                 resp = self.provider.review(
                     content_text=payload.content_text,
                     policy=policy,
                     deterministic_findings=all_raw_findings,
                     images=payload.images,
+                    **review_kwargs,
                 )
                 all_raw_findings.extend(resp.findings)
                 provider_name = resp.provider_name
@@ -317,6 +326,16 @@ class CoordinatorAgent:
                 policy_source=policy_source,
             ),
         )
+
+    def _retrieve_context(self, payload: DraftPayload) -> List[str]:
+        """Advisory retrieved context; any failure just means no extra context."""
+        if self.retriever is None:
+            return []
+        try:
+            return self.retriever.retrieve(payload.brand_id, payload.content_text)
+        except Exception as exc:
+            logger.warning("RAG retrieval skipped: %s", exc)
+            return []
 
     def _create_failure_finding(self, specialist_name: str, error: Exception) -> Finding:
         """Create high-severity finding for specialist failure to prevent false compliance passes."""
