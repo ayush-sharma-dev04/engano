@@ -72,7 +72,7 @@ function Insights({ submissions }: InsightsProps) {
       {/* Main Metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Total Reviews
@@ -85,7 +85,7 @@ function Insights({ submissions }: InsightsProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Approved
@@ -98,7 +98,7 @@ function Insights({ submissions }: InsightsProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Changes Requested
@@ -111,7 +111,7 @@ function Insights({ submissions }: InsightsProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Pending Review
@@ -130,7 +130,7 @@ function Insights({ submissions }: InsightsProps) {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
 
         {/* Approval Rate */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+        <div className="glass rounded-2xl p-6">
 
           <h2 className="text-lg font-semibold">
             Approval Rate
@@ -169,7 +169,7 @@ function Insights({ submissions }: InsightsProps) {
 
 
         {/* Findings */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+        <div className="glass rounded-2xl p-6">
 
           <h2 className="text-lg font-semibold">
             Finding Severity
@@ -295,7 +295,7 @@ function Insights({ submissions }: InsightsProps) {
 
 
       {/* Governance Overview */}
-      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+      <div className="mt-6 glass rounded-2xl p-6">
 
         <h2 className="text-lg font-semibold">
           Governance Overview
@@ -308,7 +308,7 @@ function Insights({ submissions }: InsightsProps) {
 
         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
 
-          <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/50 p-4">
 
             <p className="text-xs uppercase tracking-wider text-slate-500">
               Reviews Completed
@@ -321,7 +321,7 @@ function Insights({ submissions }: InsightsProps) {
           </div>
 
 
-          <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/50 p-4">
 
             <p className="text-xs uppercase tracking-wider text-slate-500">
               Issues Detected
@@ -334,7 +334,7 @@ function Insights({ submissions }: InsightsProps) {
           </div>
 
 
-          <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/50 p-4">
 
             <p className="text-xs uppercase tracking-wider text-slate-500">
               Review Completion

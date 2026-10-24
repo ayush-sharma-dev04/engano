@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { reviewDraft, type ReviewSummary } from './api'
+import { Icon } from './ui'
+import StudioChat from './components/StudioChat'
+import { locate } from './suggestions'
 import BrandGuidelines from './components/BrandGuidelines'
 import ReviewQueue, {
   type ReviewSubmission,
@@ -15,6 +18,11 @@ export type Finding = {
   explanation: string
   guideline: string
   suggestion: string
+  // Set for findings that can be underlined and fixed inside the editor.
+  quote?: string
+  start?: number
+  replacement?: string
+  append?: string
 }
 
 export type Guideline = {
@@ -25,6 +33,7 @@ export type Guideline = {
 
 function App() {
   const [activePage, setActivePage] = useState('studio')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const [isCreatingDraft, setIsCreatingDraft] = useState(false)
   const [isReviewing, setIsReviewing] = useState(false)
@@ -33,6 +42,8 @@ function App() {
   const [content, setContent] = useState('')
 
   const [findings, setFindings] = useState<Finding[]>([])
+  const [reviewStarted, setReviewStarted] = useState(false)
+  const [hidden, setHidden] = useState<Set<number>>(new Set())
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
 
@@ -60,6 +71,7 @@ function App() {
 
   const runReview = async () => {
     setIsReviewing(true)
+    setReviewStarted(true)
     setReviewError(null)
     setReviewSummary(null)
 
@@ -117,6 +129,7 @@ function App() {
         })
       }
 
+      setHidden(new Set())
       setFindings(newFindings)
       setReviewSummary(summary)
     } catch (error) {
@@ -128,6 +141,52 @@ function App() {
   }
 
   // ==========================================
+  // INLINE SUGGESTIONS (apply / dismiss)
+  // ==========================================
+
+  const hide = (keys: number[]) =>
+    setHidden((current) => new Set([...current, ...keys]))
+
+  const applyOne = (text: string, key: number): string => {
+    const finding = findings[key]
+    if (finding?.append) {
+      return text.toLowerCase().includes(finding.append.toLowerCase())
+        ? text
+        : `${text.trimEnd()} ${finding.append}`
+    }
+    const spot = locate(text, findings, new Set(
+      findings.map((_, i) => i).filter((i) => i !== key)
+    ))[0]
+    if (!spot || finding?.replacement === undefined) return text
+    return text.slice(0, spot.start) + finding.replacement + text.slice(spot.end)
+  }
+
+  const applySuggestion = (key: number) => {
+    setContent((text) => applyOne(text, key))
+    hide([key])
+  }
+
+  const applyAllSuggestions = () => {
+    // Right-to-left so earlier offsets stay valid.
+    const keys = locate(content, findings, hidden)
+      .filter((l) => l.finding.replacement !== undefined)
+      .sort((a, b) => b.start - a.start)
+      .map((l) => l.key)
+    const appends = findings
+      .map((f, i) => (f.append && !hidden.has(i) ? i : -1))
+      .filter((i) => i >= 0)
+    let text = content
+    for (const key of keys) text = applyOne(text, key)
+    for (const key of appends) text = applyOne(text, key)
+    setContent(text)
+    hide([...keys, ...appends])
+  }
+
+  const fixableCount =
+    locate(content, findings, hidden).filter((l) => l.finding.replacement !== undefined).length +
+    findings.filter((f, i) => f.append && !hidden.has(i)).length
+
+  // ==========================================
   // CREATE NEW DRAFT
   // ==========================================
 
@@ -135,6 +194,8 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setHidden(new Set())
+    setReviewStarted(false)
     setReviewSummary(null)
     setReviewError(null)
     setIsCreatingDraft(true)
@@ -149,6 +210,9 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setReviewStarted(false)
+    setReviewSummary(null)
+    setReviewError(null)
   }
 
   // ==========================================
@@ -164,7 +228,7 @@ function App() {
       id: Date.now(),
       title: draftTitle.trim() || 'Untitled Draft',
       content: content.trim(),
-      findings,
+      findings: findings.filter((_, index) => !hidden.has(index)),
       status: 'Pending Review',
       submittedAt: 'just now',
     }
@@ -178,6 +242,8 @@ function App() {
     setDraftTitle('')
     setContent('')
     setFindings([])
+    setReviewStarted(false)
+    setReviewSummary(null)
 
     setActivePage('reviewQueue')
   }
@@ -247,22 +313,28 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="relative min-h-screen text-white">
+
+      <div className="aurora" aria-hidden="true" />
 
       {/* ==========================================
           TOP BAR
           ========================================== */}
 
-      <header className="flex h-16 items-center justify-between border-b border-slate-800 px-6">
+      <header className="relative z-10 flex h-16 items-center justify-between border-b border-white/5 bg-slate-950/50 px-5 backdrop-blur-xl">
 
-        {/* Logo */}
+        {/* Sidebar toggle + Logo */}
         <div className="flex items-center gap-3">
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 font-bold text-slate-950">
-            E
-          </div>
+          <button
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+            className="btn-ghost flex h-9 w-9 items-center justify-center"
+          >
+            <Icon name="panel" />
+          </button>
 
-          <span className="text-xl font-bold tracking-tight">
+          <span className="text-lg font-semibold tracking-tight">
             ENGANO
           </span>
 
@@ -275,7 +347,7 @@ function App() {
             Aditya Barua
           </span>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800 text-sm font-semibold">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/40 to-fuchsia-500/30 text-sm font-semibold ring-1 ring-white/10">
             AB
           </div>
 
@@ -287,19 +359,24 @@ function App() {
           MAIN APPLICATION
           ========================================== */}
 
-      <div className="flex min-h-[calc(100vh-4rem)]">
+      <div className="relative z-10 flex min-h-[calc(100vh-4rem)]">
 
         {/* ==========================================
             SIDEBAR
             ========================================== */}
 
-        <aside className="w-60 border-r border-slate-800 bg-slate-950 p-4">
+        <aside
+          className={`shrink-0 overflow-hidden border-white/5 bg-slate-950/40 backdrop-blur-xl transition-all duration-300 ${
+            sidebarOpen ? 'w-72 border-r p-5' : 'w-0 border-r-0 p-0'
+          }`}
+        >
+          <div className="w-62">
 
-          <p className="mb-4 px-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <p className="mb-4 px-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
             Workspace
           </p>
 
-          <nav className="space-y-1">
+          <nav className="space-y-1.5">
 
             {/* Studio */}
             <button
@@ -307,12 +384,13 @@ function App() {
                 setActivePage('studio')
                 setIsCreatingDraft(false)
               }}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'studio'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
+              <Icon name="studio" />
               Studio
             </button>
 
@@ -322,14 +400,15 @@ function App() {
                 setActivePage('reviewQueue')
                 setIsCreatingDraft(false)
               }}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center justify-between rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'reviewQueue' ||
                 activePage === 'reviewDetail'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
-              <span>
+              <span className="flex items-center gap-3.5">
+                <Icon name="queue" />
                 Review Queue
               </span>
 
@@ -337,7 +416,7 @@ function App() {
                 (submission) =>
                   submission.status === 'Pending Review'
               ).length > 0 && (
-                <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-bold text-slate-950">
+                <span className="rounded-full bg-violet-500 px-2 py-0.5 text-xs font-bold text-white">
                   {
                     submissions.filter(
                       (submission) =>
@@ -355,12 +434,13 @@ function App() {
                 setActivePage('approvals')
                 setIsCreatingDraft(false)
               }}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'approvals'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
+              <Icon name="approvals" />
               Approvals
             </button>
 
@@ -370,12 +450,13 @@ function App() {
                 setActivePage('history')
                 setIsCreatingDraft(false)
               }}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'history'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
+              <Icon name="history" />
               History
             </button>
 
@@ -385,12 +466,13 @@ function App() {
                 setActivePage('insights')
                 setIsCreatingDraft(false)
               }}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'insights'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
+              <Icon name="insights" />
               Insights
             </button>
 
@@ -400,16 +482,19 @@ function App() {
                 setActivePage('guidelines')
                 setIsCreatingDraft(false)
               }}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+              className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3.5 text-left text-base font-medium transition-colors ${
                 activePage === 'guidelines'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-white/10 text-white ring-1 ring-white/10'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
+              <Icon name="guidelines" />
               Brand Guidelines
             </button>
 
           </nav>
+
+          </div>
 
         </aside>
 
@@ -417,7 +502,7 @@ function App() {
             MAIN CONTENT
             ========================================== */}
 
-        <main className="flex-1 p-8">
+        <main className="min-w-0 flex-1 p-8">
 
           {/* ==========================================
               STUDIO
@@ -426,316 +511,71 @@ function App() {
           {activePage === 'studio' && (
             <>
 
-              {/* Studio Header */}
-              <div className="mb-8">
-
-                <h1 className="text-2xl font-semibold">
-                  Studio
-                </h1>
-
-                <p className="mt-1 text-sm text-slate-400">
-                  Review your content before it goes public.
-                </p>
-
-              </div>
-
-              {/* Empty Studio */}
+              {/* Empty Studio (hero) */}
               {!isCreatingDraft && (
-                <div className="flex min-h-[500px] items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/40">
+                <div className="rise mx-auto flex min-h-[calc(100vh-9rem)] max-w-2xl flex-col items-center justify-center text-center">
 
-                  <div className="text-center">
+                  <h2 className="text-4xl font-semibold tracking-tight">
+                    What are we reviewing today?
+                  </h2>
 
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-slate-800 text-2xl">
-                      ✦
-                    </div>
+                  <p className="mt-3 max-w-md text-sm text-slate-400">
+                    Paste a post, email or announcement and ENGANO checks it against your brand guidelines.
+                  </p>
 
-                    <h2 className="text-lg font-medium">
-                      Start a brand review
-                    </h2>
+                  <button
+                    onClick={createNewDraft}
+                    className="composer mt-10 w-full cursor-text p-5 text-left"
+                  >
 
-                    <p className="mt-2 max-w-sm text-sm text-slate-400">
-                      Create or paste content and ENGANO will check it against your brand guidelines.
+                    <p className="text-base text-slate-500">
+                      Paste or write your content…
                     </p>
 
-                    <button
-                      onClick={createNewDraft}
-                      className="mt-6 rounded-lg bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
-                    >
-                      Create Draft
-                    </button>
+                    <div className="mt-10 flex items-center justify-between">
 
-                  </div>
+                      <span className="flex items-center gap-2 text-xs text-slate-400">
+                        <span className="rounded-full border border-white/10 px-2.5 py-1">Brand rules</span>
+                        <span className="rounded-full border border-white/10 px-2.5 py-1">AI agents</span>
+                      </span>
+
+                      <span className="btn-primary px-4 py-2 text-sm">
+                        Create draft
+                      </span>
+
+                    </div>
+
+                  </button>
+
+                  <p className="mt-5 flex items-center gap-2 text-xs text-slate-500">
+                    <Icon name="lock" className="h-3.5 w-3.5" />
+                    Checked against your brand policy. Nothing is published from here.
+                  </p>
 
                 </div>
               )}
 
-              {/* Draft Editor */}
+              {/* Compose + conversation */}
               {isCreatingDraft && (
-                <div>
-
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
-
-                    {/* Editor Header */}
-                    <div className="mb-6 flex items-center justify-between">
-
-                      <div>
-
-                        <h2 className="text-lg font-semibold">
-                          New Draft
-                        </h2>
-
-                        <p className="mt-1 text-sm text-slate-400">
-                          Write or paste content to begin a brand review.
-                        </p>
-
-                      </div>
-
-                      <button
-                        onClick={cancelDraft}
-                        className="rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-800 hover:text-white"
-                      >
-                        Cancel
-                      </button>
-
-                    </div>
-
-                    {/* Draft Title */}
-                    <div className="mb-4">
-
-                      <label className="mb-2 block text-sm font-medium text-slate-300">
-                        Draft title
-                      </label>
-
-                      <input
-                        type="text"
-                        value={draftTitle}
-                        onChange={(event) =>
-                          setDraftTitle(event.target.value)
-                        }
-                        placeholder="e.g. Nimbus DB Launch Campaign"
-                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-emerald-500"
-                      />
-
-                    </div>
-
-                    {/* Content */}
-                    <div>
-
-                      <label className="mb-2 block text-sm font-medium text-slate-300">
-                        Content
-                      </label>
-
-                      <textarea
-                        rows={12}
-                        value={content}
-                        onChange={(event) =>
-                          setContent(event.target.value)
-                        }
-                        placeholder="Paste or write your content here..."
-                        className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-emerald-500"
-                      />
-
-                    </div>
-
-                    {/* Buttons */}
-                    <div className="mt-5 flex justify-end gap-3">
-
-                      <button
-                        onClick={runReview}
-                        disabled={
-                          isReviewing ||
-                          content.trim() === ''
-                        }
-                        className="rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {isReviewing
-                          ? 'Reviewing...'
-                          : 'Run ENGANO Review'}
-                      </button>
-
-                    </div>
-
-                  </div>
-
-                  {/* Backend error */}
-                  {reviewError && (
-                    <div className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
-                      {reviewError}
-                    </div>
-                  )}
-
-                  {/* Decision + suggested rewrite */}
-                  {reviewSummary && (
-                    <div
-                      className={`mt-6 rounded-xl border p-5 ${
-                        reviewSummary.status === 'RED'
-                          ? 'border-red-500/40 bg-red-500/10'
-                          : reviewSummary.status === 'YELLOW'
-                            ? 'border-yellow-400/40 bg-yellow-400/10'
-                            : 'border-emerald-500/40 bg-emerald-500/10'
-                      }`}
-                    >
-                      <h2 className="text-lg font-semibold">
-                        {reviewSummary.status === 'RED'
-                          ? 'Needs reviewer approval'
-                          : reviewSummary.status === 'YELLOW'
-                            ? 'Needs your input'
-                            : 'Ready to publish'}
-                      </h2>
-                      {reviewSummary.reason && (
-                        <p className="mt-1 text-sm text-slate-300">{reviewSummary.reason}</p>
-                      )}
-                      {reviewSummary.question && (
-                        <p className="mt-2 text-sm text-slate-300">{reviewSummary.question}</p>
-                      )}
-                      {reviewSummary.rewrite && (
-                        <div className="mt-4">
-                          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                            Suggested rewrite
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950/70 p-3 text-sm text-slate-200">
-                            {reviewSummary.rewrite}
-                          </p>
-                          <button
-                            onClick={() => setContent(reviewSummary.rewrite ?? '')}
-                            className="mt-2 text-sm font-medium text-emerald-400 hover:text-emerald-300"
-                          >
-                            Use this rewrite
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Review Results */}
-                  {findings.length > 0 && (
-                    <div className="mt-6">
-
-                      <div className="mb-4">
-
-                        <h2 className="text-xl font-semibold">
-                          ENGANO Findings
-                        </h2>
-
-                        <p className="mt-1 text-sm text-slate-400">
-                          Issues detected during the brand governance review.
-                        </p>
-
-                      </div>
-
-                      <div className="space-y-4">
-
-                        {findings.map((finding, index) => (
-
-                          <div
-                            key={index}
-                            className="rounded-xl border border-slate-800 bg-slate-900/60 p-5"
-                          >
-
-                            {/* Finding Header */}
-                            <div className="flex items-start gap-3">
-
-                              <div
-                                className={`mt-1 h-3 w-3 rounded-full ${
-                                  finding.severity === 'Critical'
-                                    ? 'bg-red-500'
-                                    : finding.severity === 'Warning'
-                                      ? 'bg-yellow-400'
-                                      : 'bg-blue-400'
-                                }`}
-                              />
-
-                              <div className="flex-1">
-
-                                <div className="flex flex-wrap items-center gap-2">
-
-                                  <h3 className="font-semibold">
-                                    {finding.issue}
-                                  </h3>
-
-                                  <span
-                                    className={`rounded-full px-2 py-1 text-xs font-medium ${
-                                      finding.severity === 'Critical'
-                                        ? 'bg-red-500/10 text-red-400'
-                                        : finding.severity === 'Warning'
-                                          ? 'bg-yellow-400/10 text-yellow-300'
-                                          : 'bg-blue-400/10 text-blue-300'
-                                    }`}
-                                  >
-                                    {finding.severity}
-                                  </span>
-
-                                </div>
-
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {finding.category}
-                                </p>
-
-                              </div>
-
-                            </div>
-
-                            {/* Explanation */}
-                            <div className="mt-5 rounded-lg bg-slate-950/70 p-4">
-
-                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                                Why ENGANO flagged this
-                              </p>
-
-                              <p className="mt-2 text-sm leading-6 text-slate-300">
-                                {finding.explanation}
-                              </p>
-
-                            </div>
-
-                            {/* Guideline */}
-                            <div className="mt-3 rounded-lg border border-slate-800 p-4">
-
-                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                                Guideline involved
-                              </p>
-
-                              <p className="mt-2 text-sm leading-6 text-slate-300">
-                                {finding.guideline}
-                              </p>
-
-                            </div>
-
-                            {/* Suggested Correction */}
-                            <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
-
-                              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                                Suggested correction
-                              </p>
-
-                              <p className="mt-2 text-sm leading-6 text-slate-300">
-                                {finding.suggestion}
-                              </p>
-
-                            </div>
-
-                          </div>
-
-                        ))}
-
-                      </div>
-
-                      {/* Submit Button */}
-                      <div className="mt-6 flex justify-end">
-
-                        <button
-                          onClick={submitForReview}
-                          className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
-                        >
-                          Submit for Review
-                        </button>
-
-                      </div>
-
-                    </div>
-                  )}
-
-                </div>
+                <StudioChat
+                  title={draftTitle}
+                  onTitle={setDraftTitle}
+                  content={content}
+                  onContent={setContent}
+                  findings={findings}
+                  hidden={hidden}
+                  onApply={applySuggestion}
+                  onDismiss={(key) => hide([key])}
+                  onFixAll={applyAllSuggestions}
+                  fixableCount={fixableCount}
+                  started={reviewStarted}
+                  isReviewing={isReviewing}
+                  summary={reviewSummary}
+                  error={reviewError}
+                  onRun={runReview}
+                  onCancel={cancelDraft}
+                  onSubmit={submitForReview}
+                />
               )}
 
             </>
@@ -788,7 +628,7 @@ function App() {
               </div>
 
               {/* Submission */}
-              <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+              <div className="mb-6 glass rounded-2xl p-6">
 
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Submission
@@ -805,7 +645,7 @@ function App() {
               </div>
 
               {/* Content */}
-              <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+              <div className="mb-6 glass rounded-2xl p-6">
 
                 <h2 className="text-lg font-semibold">
                   Content
@@ -842,7 +682,7 @@ function App() {
 
                     <div
                       key={index}
-                      className="rounded-xl border border-slate-800 bg-slate-900/60 p-5"
+                      className="glass rounded-2xl p-5"
                     >
 
                       {/* Finding Header */}
@@ -902,7 +742,7 @@ function App() {
                       </div>
 
                       {/* Guideline */}
-                      <div className="mt-3 rounded-lg border border-slate-800 p-4">
+                      <div className="mt-3 rounded-lg border border-white/10 p-4">
 
                         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                           Guideline involved
@@ -936,7 +776,7 @@ function App() {
               </div>
 
               {/* Reviewer Decision */}
-              <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/60 p-6">
+              <div className="mt-8 glass rounded-2xl p-6">
 
                 <div className="flex items-center justify-between gap-6">
 
@@ -963,7 +803,7 @@ function App() {
 
                     <button
                       onClick={approveSubmission}
-                      className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                      className="btn-primary px-5 py-3 text-sm"
                     >
                       Approve
                     </button>
@@ -1016,7 +856,7 @@ function App() {
                           setChangeRequestComment(event.target.value)
                         }
                         placeholder="e.g. Please remove the unsupported performance claim and replace it with an approved statement."
-                        className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-red-500"
+                        className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-red-500"
                       />
 
                     </div>

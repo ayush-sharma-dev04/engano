@@ -7,6 +7,7 @@ type ApiFinding = {
   severity: 'low' | 'medium' | 'high' | 'critical'
   category: string
   highlighted_text: string
+  text_span?: { start: number; end: number } | null
   explanation: string
   cited_source?: string | null
   suggested_fix?: string | null
@@ -31,6 +32,9 @@ const SEVERITY: Record<ApiFinding['severity'], Finding['severity']> = {
   medium: 'Warning',
   low: 'Suggestion',
 }
+
+// Advice, not wording that can be pasted into the draft (mirrors the backend rewrite agent).
+const GUIDANCE = /^(rephrase|remove or replace|replace with|check|contact)/i
 
 const CATEGORY: Record<string, string> = {
   terminology: 'Terminology',
@@ -58,14 +62,24 @@ export async function reviewDraft(text: string): Promise<{ findings: Finding[]; 
   }
   const data = (await response.json()) as ApiResult
 
-  const findings: Finding[] = data.findings.map((f) => ({
-    severity: SEVERITY[f.severity] ?? 'Warning',
-    category: CATEGORY[f.category] ?? f.category,
-    issue: f.highlighted_text ? `“${f.highlighted_text}”` : 'Review could not complete',
-    explanation: f.explanation,
-    guideline: f.cited_source ?? 'Brand policy',
-    suggestion: f.suggested_fix ?? 'Ask a reviewer to check this section.',
-  }))
+  const findings: Finding[] = data.findings.map((f) => {
+    const fix = f.suggested_fix ?? null
+    const append = fix && /^append required disclaimer/i.test(fix) ? fix.match(/'(.+)'\s*$/)?.[1] : undefined
+    const literal = fix !== null && !append && !GUIDANCE.test(fix)
+    const hasSpan = !!f.highlighted_text && !append && f.highlighted_text.length < 400
+    return {
+      severity: SEVERITY[f.severity] ?? 'Warning',
+      category: CATEGORY[f.category] ?? f.category,
+      issue: f.highlighted_text ? `“${f.highlighted_text}”` : 'Review could not complete',
+      explanation: f.explanation,
+      guideline: f.cited_source ?? 'Brand policy',
+      suggestion: fix ?? 'Ask a reviewer to check this section.',
+      quote: hasSpan ? f.highlighted_text : undefined,
+      start: hasSpan ? f.text_span?.start : undefined,
+      replacement: hasSpan && literal ? fix : undefined,
+      append,
+    }
+  })
 
   return {
     findings,
