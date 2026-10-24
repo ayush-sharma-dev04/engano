@@ -20,6 +20,7 @@ from ai_engine.schemas.findings import (
     FindingSeverity,
     TextSpan,
 )
+from ai_engine.schemas.payload import ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,13 @@ class OllamaProvider(BaseProvider):
         content_text: str,
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
+        images: Optional[List[ImageItem]] = None,
     ) -> ProviderResponse:
-        """Execute semantic analysis via local Ollama endpoint."""
+        """Execute semantic analysis via local Ollama endpoint.
+
+        When `images` are present (URLs or base64 bytes from Discord/WhatsApp), they
+        are forwarded to qwen2.5vl under the `images` key for multimodal inspection.
+        """
         start_time = time.perf_counter()
 
         policy_summary = policy.model_dump_json(exclude_none=True)
@@ -67,14 +73,28 @@ class OllamaProvider(BaseProvider):
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
 
+        # Multimodal: forward image URLs or embedded base64 bytes for qwen2.5vl inspection
+        image_refs: List[str] = []
+        for img in images or []:
+            if img.url:
+                prompt += f"\n=== IMAGE ATTACHMENT ===\nurl: {img.url}\nalt_text: {img.alt_text or ''}\n"
+                image_refs.append(img.url)
+            meta = img.metadata or {}
+            embedded = meta.get("base64") or meta.get("bytes")
+            if embedded:
+                image_refs.append(str(embedded))
+
         url = f"{self.base_url}/api/generate"
-        payload = {
+        payload: dict = {
             "model": self.model,
             "prompt": prompt,
             "format": "json",
             "stream": False,
+            "keep_alive": "1h",
             "options": {"temperature": 0.0},
         }
+        if image_refs:
+            payload["images"] = image_refs
 
         try:
             resp = self._client.post(url, json=payload)
@@ -142,3 +162,79 @@ class OllamaProvider(BaseProvider):
             raw_response=raw_text,
             latency_ms=latency_ms,
         )
+
+    def generate_rewrite(
+        self,
+        content_text: str,
+        policy: BrandPolicy,
+        findings: List[Finding],
+        images: Optional[List[ImageItem]] = None,
+    ) -> Optional[str]:
+        """Generate a coherent rewrite via the local LLM, preserving meaning and brand rules."""
+        if not content_text:
+            return None
+
+        issues = "\n".join(
+            f"- '{f.highlighted_text}' [{f.category.value}/{f.severity.value}] "
+            f"({f.suggested_fix or 'remove'})"
+            for f in findings
+        )
+
+        prompt = (
+            "You are a meticulous brand-governance copy editor. Rewrite the draft copy below\n"
+            "to resolve every listed issue: preserve the original meaning and intent, adopt the\n"
+            "brand-approved variant of product names, and address each finding using its suggested\n"
+            "fix (an empty suggestion means delete that span). Output ONLY the rewritten draft\n"
+            "text, with no explanations, headers, or markdown fences.\n\n"
+            f"=== ISSUES TO RESOLVE ===\n{issues}\n\n"
+            f"=== DRAFT ===\n{content_text}\n"
+        )
+
+        url = f"{self.base_url}/api/generate"
+        payload: dict = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": "1h",
+            "options": {"temperature": 0.0},
+        }
+        if images:
+            payload["images"] = [img.url for img in images if img.url]
+
+        try:
+            resp = self._client.post(url, json=payload)
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"Ollama request timed out after {self.timeout}s for model '{self.model}'."
+            ) from None
+        except httpx.ConnectError:
+            return None
+        except Exception as exc:
+            logger.warning("Ollama rewrite request failed: %s", exc)
+            return None
+
+        if resp.status_code != 200:
+            logger.warning("Ollama rewrite returned HTTP %s", resp.status_code)
+            return None
+
+        try:
+            body = resp.json()
+            raw_text = body.get("response", "")
+        except Exception as exc:
+            logger.warning("Invalid JSON envelope from Ollama rewrite: %s", exc)
+            return None
+
+        return _clean_rewrite_output(raw_text)
+
+
+def _clean_rewrite_output(raw_text: str) -> Optional[str]:
+    """Strip markdown fences/whitespace and return the proposed rewrite text."""
+    text = (raw_text or "").strip()
+    if text.startswith("```"):
+        text = text.splitlines()
+        text = "\n".join(text[1:]) if len(text) > 1 else ""
+        text = text.strip()
+    if text.endswith("```"):
+        text = text[:-3].rstrip()
+    text = text.strip()
+    return text or None

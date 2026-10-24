@@ -217,6 +217,7 @@ class CoordinatorAgent:
                     content_text=payload.content_text,
                     policy=policy,
                     deterministic_findings=all_raw_findings,
+                    images=payload.images,
                 )
                 all_raw_findings.extend(resp.findings)
                 provider_name = resp.provider_name
@@ -257,6 +258,7 @@ class CoordinatorAgent:
             content_text=payload.content_text,
             findings=unique_findings,
             policy=policy,
+            provider=self.provider if not is_rules_only else None,
         )
 
         # STRICT SAFETY CONTRACT: A rewrite agent must NEVER override a RED decision.

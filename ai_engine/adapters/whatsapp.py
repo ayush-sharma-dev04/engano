@@ -1,7 +1,7 @@
 """WhatsApp channel adapter.
 
-Normalizes messages and image attachments originating from WhatsApp Business Webhooks.
-Extracts message text, image metadata, sender info, and business phone identifiers.
+Normalizes messages and image attachments originating from WhatsApp Business Webhooks
+using payload models defined in WhatsApp/engano_whatsapp/payload.py.
 """
 
 from typing import Any, List, Optional

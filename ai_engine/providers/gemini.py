@@ -22,6 +22,7 @@ from ai_engine.schemas.findings import (
     FindingSeverity,
     TextSpan,
 )
+from ai_engine.schemas.payload import ImageItem
 
 logger = logging.getLogger(__name__)
 PRIMARY_GEMINI_MODEL = "gemini-flash-lite-latest"
@@ -65,6 +66,7 @@ class GeminiProvider(BaseProvider):
         content_text: str,
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
+        images: Optional[List[ImageItem]] = None,
     ) -> ProviderResponse:
         """Call Gemini to perform semantic review of the draft content."""
         start_time = time.perf_counter()
@@ -79,6 +81,10 @@ class GeminiProvider(BaseProvider):
             f"=== DETERMINISTIC FINDINGS DETECTED SO FAR ===\n{findings_summary}\n\n"
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
+
+        if images:
+            image_refs = [img.url for img in images if img.url]
+            prompt += f"\n=== IMAGE ATTACHMENTS ===\n{json.dumps(image_refs)}\n"
 
         model_candidates = []
         if self.model:
@@ -182,3 +188,64 @@ class GeminiProvider(BaseProvider):
             raw_response=raw_text,
             latency_ms=latency_ms,
         )
+
+    def generate_rewrite(
+        self,
+        content_text: str,
+        policy: BrandPolicy,
+        findings: List[Finding],
+        images: Optional[List[ImageItem]] = None,
+    ) -> Optional[str]:
+        """Generate a coherent rewrite via Gemini, preserving meaning and brand rules."""
+        if not content_text:
+            return None
+
+        issues = "\n".join(
+            f"- '{f.highlighted_text}' [{f.category.value}/{f.severity.value}] "
+            f"({f.suggested_fix or 'remove'})"
+            for f in findings
+        )
+        prompt = (
+            "You are a meticulous brand-governance copy editor. Rewrite the draft copy below\n"
+            "to resolve every listed issue: preserve meaning and intent, adopt brand-approved\n"
+            "product-name variants, and apply each suggested fix (empty suggestion => delete).\n"
+            "Output ONLY the rewritten draft text, no explanations or markdown fences.\n\n"
+            f"=== ISSUES TO RESOLVE ===\n{issues}\n\n"
+            f"=== DRAFT ===\n{content_text}\n"
+        )
+
+        model_candidates = []
+        if self.model:
+            model_candidates.append(self.model)
+        model_candidates.extend(m for m in FALLBACK_GEMINI_MODELS if m not in model_candidates)
+
+        last_error: Optional[Exception] = None
+        raw_text = ""
+        for model_name in model_candidates:
+            try:
+                response = self._client.models.generate_content(model=model_name, contents=prompt)
+                raw_text = response.text if hasattr(response, "text") else str(response)
+                break
+            except genai_errors.APIError as exc:
+                last_error = exc
+                logger.warning("Gemini model '%s' returned an error; trying next model.", model_name)
+                continue
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Gemini rewrite client error: %s", type(exc).__name__)
+                continue
+
+        if not raw_text:
+            logger.warning(
+                "Gemini rewrite failed%s", f": {getattr(last_error, 'message', last_error)}" if last_error else ""
+            )
+            return None
+
+        # Strip markdown code fences if the model included them
+        clean = raw_text.strip()
+        if clean.startswith("```"):
+            clean = clean.splitlines()[1:] if clean.count("\n") else []
+            clean = "\n".join(clean).strip()
+        if clean.endswith("```"):
+            clean = clean[:-3].rstrip()
+        return clean.strip() or None

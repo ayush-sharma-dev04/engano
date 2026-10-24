@@ -5,7 +5,8 @@ Distinguishes verified, unsupported, contradicted, and unverified user-provided 
 without fabricating source citations.
 """
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
+import re
 from pydantic import BaseModel
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import EvidenceStatus, Finding, FindingCategory
@@ -20,6 +21,34 @@ class ClaimValidationReport(BaseModel):
     unverified_provided_count: int
 
 
+_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[a-z]+")
+
+
+def _claim_tokens(text: str) -> Set[str]:
+    """Extract significant claim tokens (numbers and words >= 3 chars) from text."""
+    return {tok for tok in _TOKEN_RE.findall(text.lower()) if len(tok) >= 3}
+
+
+def _materially_supported_by_fact(
+    highlight: str,
+    approved_facts_lower: List[str],
+    approved_fact_tokens: List[Set[str]],
+    subject_tokens: Set[str],
+) -> bool:
+    """Return True if a finding's highlighted claim materially restates an approved fact."""
+    if len(highlight) < 10 or highlight in subject_tokens:
+        return False
+    highlight_tokens = _claim_tokens(highlight)
+    if not highlight_tokens:
+        return False
+    for fact, fact_tokens in zip(approved_facts_lower, approved_fact_tokens):
+        if highlight in fact:
+            return True
+        if highlight_tokens and fact_tokens and highlight_tokens.issubset(fact_tokens):
+            return True
+    return False
+
+
 class EvidenceValidationAgent:
     """Agent for rigorous validation of claim-evidence relationships."""
 
@@ -32,6 +61,23 @@ class EvidenceValidationAgent:
         """Validate and classify evidence status for all findings."""
         validated: List[Finding] = []
 
+        # Authoritative approved facts used to suppress AI false-positive findings that
+        # merely restate the brand's own approved fact (e.g. AI flags "99.95% uptime SLA"
+        # as an unverified claim). Never suppress solely for naming the same subject
+        # (brand name / approved term) or short tokens.
+        approved_facts_lower = [
+            fr.approved_fact.lower().strip()
+            for fr in policy.factual_rules
+            if fr.is_active and fr.approved_fact
+        ]
+        approved_fact_tokens: List[Set[str]] = [
+            _claim_tokens(f) for f in approved_facts_lower
+        ]
+        subject_tokens = {
+            policy.brand_name.lower().strip(),
+            *(term.approved_term.lower().strip() for term in policy.approved_terminology),
+        }
+
         for finding in findings:
             updated = finding.model_copy()
 
@@ -42,6 +88,15 @@ class EvidenceValidationAgent:
 
             # Evaluate against authoritative facts
             text_lowered = finding.highlighted_text.lower()
+
+            # Suppress findings whose specific claim materially matches an approved fact.
+            # This targets AI-generated false positives without dropping genuine
+            # contradictions, unsupported claims, or deterministic findings.
+            highlight_stripped = text_lowered.strip()
+            if _materially_supported_by_fact(
+                highlight_stripped, approved_facts_lower, approved_fact_tokens, subject_tokens
+            ):
+                continue
 
             # Check if contradicted by an active fact or retired offer
             is_contradicted = False

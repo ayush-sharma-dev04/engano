@@ -6,17 +6,34 @@ Performs post-rewrite revalidation against deterministic rules and policy checks
 STRICT CONTRACT: A proposed rewrite never overrides or bypasses an underlying RED decision.
 """
 
-from typing import List, Optional
+import logging
+from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 from ai_engine.agents.specialists.legal_policy_specialist import LegalPolicySpecialist
 from ai_engine.agents.specialists.tone_specialist import ToneSpecialist
+from ai_engine.providers.base import BaseProvider
 from ai_engine.rules.claims import evaluate_claims
 from ai_engine.rules.factual import evaluate_factual
 from ai_engine.rules.terminology import evaluate_terminology
 from ai_engine.schemas.brand_policy import BrandPolicy
-from ai_engine.schemas.findings import Finding, FindingCategory, FindingSeverity
+from ai_engine.schemas.findings import (
+    Finding,
+    FindingCategory,
+    FindingSeverity,
+)
 from ai_engine.schemas.payload import DraftPayload
 from ai_engine.schemas.review import ReviewDecision
+
+logger = logging.getLogger(__name__)
+
+# Prefixes that indicate suggested_fix is textual guidance, not a literal replacement.
+_GUIDANCE_PREFIXES = (
+    "rephrase",
+    "remove or replace",
+    "replace with",
+    "check",
+    "contact",
+)
 
 
 class RewriteProposal(BaseModel):
@@ -42,8 +59,15 @@ class RewriteAgent:
         content_text: str,
         findings: List[Finding],
         policy: BrandPolicy,
+        provider=None,
     ) -> RewriteProposal:
-        """Generate a minimal safe rewrite and revalidate it against policy checks."""
+        """Generate a minimal safe rewrite and revalidate it against policy checks.
+
+        When an active LLM provider is supplied (provider_name != 'rules_only'), an
+        LLM-generated coherent rewrite is attempted first; if it does not fully pass
+        post-rewrite revalidation, the agent falls back to deterministic mechanical
+        fixes so correctness is never compromised.
+        """
         # 1. Clean draft needs no rewrite
         if not findings:
             return RewriteProposal(
@@ -57,71 +81,77 @@ class RewriteAgent:
                 explanation="Draft is compliant; no rewrite required.",
             )
 
-        # 2. Identify replaceable findings with concrete suggested fixes and valid spans
+        # 2. Categorize findings
         replaceable_findings = [
             f for f in findings
-            if f.suggested_fix and f.text_span.end > f.text_span.start
+            if f.suggested_fix is not None and f.text_span.end > f.text_span.start
         ]
-
-        # 3. Identify unfixable critical findings that require manual creator or reviewer action
         unfixable = [
             f for f in findings
-            if not f.suggested_fix
+            if f.suggested_fix is None
             or f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH)
             or f.category in (FindingCategory.LEGAL, FindingCategory.OUTDATED_OFFER)
         ]
 
-        # If no findings can be safely and mechanically repaired
+        # 3. No mechanically replaceable finding: produce a clarifying proposal.
         if not replaceable_findings:
+            # Accessibility-only violations get an appropriate, non-alarming message.
+            if all(f.category == FindingCategory.VISUAL_WCAG for f in findings):
+                clarification = (
+                    "Draft contains visual accessibility issues (such as missing alt text "
+                    "or contrast thresholds). Please review image metadata before publishing."
+                )
+                post_decision = (
+                    ReviewDecision.RED
+                    if any(f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH) for f in findings)
+                    else ReviewDecision.YELLOW
+                )
+            else:
+                clarification = (
+                    "Content has high-risk policy violations requiring creator or reviewer revision."
+                )
+                post_decision = ReviewDecision.RED
             return RewriteProposal(
                 proposed_text=None,
                 applied_fixes=[],
                 original_findings=findings,
                 requires_clarification=True,
-                clarification_question="Content has high-risk policy violations requiring creator or reviewer revision.",
+                clarification_question=clarification,
                 unresolved_findings=findings,
                 new_findings=[],
                 is_post_revalidation_passed=False,
-                post_revalidation_decision=ReviewDecision.RED if any(
-                    f.severity in (FindingSeverity.CRITICAL, FindingSeverity.HIGH) for f in findings
-                ) else ReviewDecision.YELLOW,
+                post_revalidation_decision=post_decision,
                 explanation="Draft contains unfixable policy violations; safe automatic rewrite cannot be generated.",
             )
 
-        # Sort reverse text order to preserve character offsets during replacements
-        replaceable_findings.sort(key=lambda x: x.text_span.start, reverse=True)
+        # 4. Deterministic mechanical candidate (always available as the safe fallback).
+        current_text, applied_fixes = self._apply_mechanical_fixes(
+            content_text, replaceable_findings
+        )
 
-        current_text = content_text
-        applied_fixes: List[str] = []
+        # 5. Prefer a fully-clean LLM-generated coherent rewrite when a semantic
+        #    provider is active. Verify it against deterministic revalidation first;
+        #    only adopt it if revalidation passes with no remaining or new findings.
+        candidate_text = current_text
+        candidate_applied = applied_fixes
+        candidate_source = "mechanical"
 
-        for f in replaceable_findings:
-            start = f.text_span.start
-            end = f.text_span.end
-            fix = f.suggested_fix
+        is_llm = (
+            isinstance(provider, BaseProvider)
+            and getattr(provider, "provider_name", "rules_only") != "rules_only"
+            and callable(getattr(provider, "generate_rewrite", None))
+        )
+        if is_llm:
+            llm_text = self._safe_generate_llm_rewrite(content_text, policy, findings, provider)
+            if llm_text:
+                llm_remaining = self._post_revalidate(llm_text, policy)
+                if not llm_remaining:
+                    candidate_text = llm_text
+                    candidate_applied = ["LLM-generated coherent rewrite"]
+                    candidate_source = "llm"
 
-            # Ensure exact slice matches to avoid corrupted replacements
-            if fix and current_text[start:end] == f.highlighted_text:
-                # Do not substitute meta-instructions as literal draft copy
-                if any(fix.lower().startswith(p) for p in ("rephrase", "remove or replace", "replace with", "check", "contact")):
-                    continue
-                current_text = current_text[:start] + fix + current_text[end:]
-                applied_fixes.append(
-                    f"Replaced '{f.highlighted_text}' with '{fix}' ({f.category.value})"
-                )
-
-        # 4. Post-Rewrite Revalidation across all specialist rule domains
-        reval_error: Optional[str] = None
-        remaining: List[Finding] = []
-        try:
-            reval_payload = DraftPayload(draft_id="post_rewrite_reval", content_text=current_text, brand_id=policy.brand_id)
-            post_term = evaluate_terminology(current_text, policy)
-            post_claims = evaluate_claims(current_text, policy)
-            post_facts = evaluate_factual(current_text, policy)
-            post_tone = ToneSpecialist().evaluate(reval_payload, policy)
-            post_legal = LegalPolicySpecialist().evaluate(reval_payload, policy)
-            remaining = post_term + post_claims + post_facts + post_tone + post_legal
-        except Exception as exc:
-            reval_error = f"Revalidation failed ({type(exc).__name__}: {exc})"
+        # 6. Post-Rewrite Revalidation across all specialist rule domains
+        reval_error, remaining = self._safe_post_revalidate(candidate_text, policy)
 
         # Distinguish between original unresolved findings and new findings introduced by rewrite
         original_keys = {(f.category, f.highlighted_text) for f in findings}
@@ -129,10 +159,7 @@ class RewriteAgent:
             f for f in remaining
             if (f.category, f.highlighted_text) not in original_keys
         ]
-        unresolved_findings = [
-            f for f in remaining
-            if f not in new_findings
-        ]
+        unresolved_findings = [f for f in remaining if f not in new_findings]
 
         is_passed = (len(remaining) == 0) and (reval_error is None)
 
@@ -147,18 +174,24 @@ class RewriteAgent:
         requires_clarification = bool(unfixable) or bool(new_findings)
         clarification_q = None
         if unfixable:
-            clarification_q = (
-                "Rewritten copy addresses mechanical fixes, but remaining high-risk claims "
-                "require reviewer approval."
-            )
+            if all(f.category == FindingCategory.VISUAL_WCAG for f in unfixable):
+                clarification_q = (
+                    "Draft contains visual accessibility issues (such as missing alt text "
+                    "or contrast thresholds). Please review image metadata before publishing."
+                )
+            else:
+                clarification_q = (
+                    "Rewritten copy addresses mechanical fixes, but remaining high-risk claims "
+                    "require reviewer approval."
+                )
         elif new_findings:
             clarification_q = (
                 "Proposed rewrite introduced secondary policy findings; human review required."
             )
 
         return RewriteProposal(
-            proposed_text=current_text,
-            applied_fixes=applied_fixes,
+            proposed_text=candidate_text,
+            applied_fixes=candidate_applied,
             requires_clarification=requires_clarification,
             clarification_question=clarification_q,
             original_findings=findings,
@@ -168,7 +201,73 @@ class RewriteAgent:
             post_revalidation_decision=post_decision,
             revalidation_error=reval_error,
             explanation=(
-                f"Applied {len(applied_fixes)} fix(es). "
+                f"Rewrite sourced from {candidate_source}. "
+                f"Applied {len(candidate_applied)} fix(es). "
                 f"Post-revalidation {'passed cleanly' if is_passed else f'flagged {len(remaining)} item(s)'}."
             ),
         )
+
+    # ------------------------------------------------------------------ helpers
+    def _apply_mechanical_fixes(
+        self, content_text: str, replaceable_findings: List[Finding]
+    ) -> Tuple[str, List[str]]:
+        """Apply deterministic string replacements, including empty-string (deletion) fixes."""
+        # Sort reverse text order to preserve character offsets during replacements
+        ordered = sorted(replaceable_findings, key=lambda x: x.text_span.start, reverse=True)
+        current_text = content_text
+        applied_fixes: List[str] = []
+
+        for f in ordered:
+            start = f.text_span.start
+            end = f.text_span.end
+            fix = f.suggested_fix
+
+            # Only apply literal replacements when the slice matches exactly.
+            if current_text[start:end] != f.highlighted_text:
+                continue
+
+            # Guidance-only suggestions (e.g. "Rephrase in...") are not literal replacements.
+            if fix and any(fix.lower().startswith(p) for p in _GUIDANCE_PREFIXES):
+                continue
+
+            # An empty suggested_fix means "delete this span".
+            replacement = fix if fix else ""
+            current_text = current_text[:start] + replacement + current_text[end:]
+            label = replacement if replacement else "<removed>"
+            applied_fixes.append(
+                f"Replaced '{f.highlighted_text}' with '{label}' ({f.category.value})"
+            )
+
+        return current_text, applied_fixes
+
+    def _post_revalidate(self, text: str, policy: BrandPolicy) -> List[Finding]:
+        """Revalidate rewritten text against all deterministic rule domains."""
+        reval_payload = DraftPayload(
+            draft_id="post_rewrite_reval",
+            content_text=text,
+            brand_id=policy.brand_id,
+        )
+        return (
+            evaluate_terminology(text, policy)
+            + evaluate_claims(text, policy)
+            + evaluate_factual(text, policy)
+            + ToneSpecialist().evaluate(reval_payload, policy)
+            + LegalPolicySpecialist().evaluate(reval_payload, policy)
+        )
+
+    def _safe_post_revalidate(self, text: str, policy: BrandPolicy) -> Tuple[Optional[str], List[Finding]]:
+        try:
+            return None, self._post_revalidate(text, policy)
+        except Exception as exc:
+            logger.error("Post-rewrite revalidation failed: %s", exc)
+            return f"Revalidation failed ({type(exc).__name__}: {exc})", []
+
+    def _safe_generate_llm_rewrite(
+        self, content_text: str, policy: BrandPolicy, findings: List[Finding], provider
+    ) -> Optional[str]:
+        """Attempt an LLM rewrite; return None on any failure (caller falls back to mechanical)."""
+        try:
+            return provider.generate_rewrite(content_text, policy, findings)
+        except Exception as exc:
+            logger.warning("LLM rewrite generation failed, falling back to mechanical: %s", exc)
+            return None

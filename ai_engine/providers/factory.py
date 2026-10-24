@@ -6,7 +6,7 @@ data to cloud providers.
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 import httpx
 from ai_engine.config import EngineConfig, ProviderType, get_engine_config
 from ai_engine.providers.base import BaseProvider, ProviderResponse
@@ -14,6 +14,7 @@ from ai_engine.providers.gemini import GeminiProvider
 from ai_engine.providers.ollama import OllamaProvider
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import Finding
+from ai_engine.schemas.payload import ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class RulesOnlyProvider(BaseProvider):
         content_text: str,
         policy: BrandPolicy,
         deterministic_findings: list[Finding],
+        images: Optional[List[ImageItem]] = None,
     ) -> ProviderResponse:
         """Return empty semantic findings; deterministic rules handle evaluation."""
         return ProviderResponse(

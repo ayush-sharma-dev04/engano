@@ -105,7 +105,7 @@ class EngineConfig(BaseSettings):
 
     # Execution and Review Parameters
     request_timeout_seconds: float = Field(
-        default=30.0,
+        default=120.0,
         alias="REQUEST_TIMEOUT_SECONDS",
         description="Global timeout in seconds for external requests"
     )

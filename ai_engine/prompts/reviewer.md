@@ -11,6 +11,15 @@ Your purpose is to evaluate untrusted marketing and product draft copy against a
 5. Identify exact text spans [start, end) where violations occur in the original draft copy.
 6. Separate confirmed violations from ambiguity or uncertainty. Prefer requesting reviewer approval over fabricating compliance.
 
+## TONE EVALUATION (against the active `tone_rules` in the Brand Policy above)
+In addition to the brand and claims checks, inspect the draft copy for nuanced tone
+violations, specifically: sarcasm or mocking framing of product value, pressure
+tactics (urgency scares, false scarcity, "act now"/"limited time" pressure), and
+competitor put-downs (mocking or disparaging rivals, competitors, or the competition).
+For each violation found, quote the EXACT offending text snippet and cite the
+specific `rule_id` from the applicable tone rule. Report these as findings with
+category `tone_mismatch`. Do not flag benign, objective references to competitors.
+
 ## REQUIRED OUTPUT FORMAT:
 Return a valid JSON object matching the following structure:
 ```json

@@ -16,6 +16,12 @@ from ai_engine.schemas.findings import (
 )
 
 
+def _phrase_regex(phrase: str) -> str:
+    """Build a word-boundary-safe regex matching a phrase with flexible inner whitespace."""
+    tokens = [re.escape(tok) for tok in re.split(r"\s+", phrase) if tok]
+    return rf"(?<!\w){r'\s+'.join(tokens)}(?!\w)"
+
+
 def _has_applicable_benchmark(benchmark_id: str, supplied_evidence: Optional[Any]) -> bool:
     """Check if the required benchmark is cited in supplied evidence."""
     if not supplied_evidence:
@@ -141,5 +147,87 @@ def evaluate_claims(
                     human_review_required=True,
                 )
             )
+
+    # 3. Absolute Legal Claims (default absolute legal guarantees not covered by policy data)
+    absolute_legal_claims = [
+        "risk-free",
+        "risk free",
+        "fully compliant with every law",
+    ]
+    for phrase in absolute_legal_claims:
+        pattern = _phrase_regex(phrase)
+
+        for match in re.finditer(pattern, content_text, re.IGNORECASE):
+            start, end = match.span()
+            matched_text = content_text[start:end]
+            findings.append(
+                Finding(
+                    finding_id=f"claim_legal_{start}_{end}",
+                    category=FindingCategory.UNSUPPORTED_CLAIM,
+                    severity=FindingSeverity.HIGH,
+                    highlighted_text=matched_text,
+                    text_span=TextSpan(start=start, end=end),
+                    explanation=(
+                        f"Absolute legal claim '{matched_text}' is prohibited by brand claims policy; "
+                        "absolute legal guarantees cannot be substantiated."
+                    ),
+                    evidence_status=EvidenceStatus.UNSUPPORTED,
+                    cited_source="Rule 4.2 Legal Claims Policy",
+                    suggested_fix="rephrase with qualified, verifiable language",
+                    human_review_required=True,
+                )
+            )
+
+    # 4. Competitor Put-Downs
+    # Single regex with optional "our" prefix avoids overlapping duplicate matches for
+    # "our rivals are a joke" vs "rivals are a joke".
+    competitor_putdown_patterns = [
+        r"(?<!\w)(?:our\s+)?(?:rivals|competitors|competition)\s+are\s+a\s+joke(?!\w)",
+    ]
+    for pattern in competitor_putdown_patterns:
+        for match in re.finditer(pattern, content_text, re.IGNORECASE):
+            start, end = match.span()
+            matched_text = content_text[start:end]
+            findings.append(
+                Finding(
+                    finding_id=f"claim_putdown_{start}_{end}",
+                    category=FindingCategory.TONE_MISMATCH,
+                    severity=FindingSeverity.MEDIUM,
+                    highlighted_text=matched_text,
+                    text_span=TextSpan(start=start, end=end),
+                    explanation=(
+                        f"Competitor put-down '{matched_text}' violates brand tone policy "
+                        "against disparaging rivals or competitors."
+                    ),
+                    evidence_status=EvidenceStatus.UNSUPPORTED,
+                    cited_source="Rule 3.1 Tone Policy",
+                    suggested_fix="Rephrase in a professional, objective brand voice without disparaging competitors.",
+                    human_review_required=True,
+                )
+            )
+
+    # 5. Standalone Guarantee with Exclamation (flags "guaranteed!", "Guaranteed!!")
+    #    Uses an empty suggested_fix so RewriteAgent mechanically strips the token
+    #    and the post-rewrite re-check stays clean.
+    for match in re.finditer(r"(?<!\w)guaranteed!+(?!\w)", content_text, re.IGNORECASE):
+        start, end = match.span()
+        matched_text = content_text[start:end]
+        findings.append(
+            Finding(
+                finding_id=f"claim_guarantee_bang_{start}_{end}",
+                category=FindingCategory.UNSUPPORTED_CLAIM,
+                severity=FindingSeverity.HIGH,
+                highlighted_text=matched_text,
+                text_span=TextSpan(start=start, end=end),
+                explanation=(
+                    f"Absolute guarantee '{matched_text}' is prohibited by brand claims policy; "
+                    "absolute guarantees cannot be substantiated."
+                ),
+                evidence_status=EvidenceStatus.UNSUPPORTED,
+                cited_source="Rule 4.2 Legal Claims Policy",
+                suggested_fix="",
+                human_review_required=True,
+            )
+        )
 
     return findings
