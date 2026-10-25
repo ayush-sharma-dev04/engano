@@ -55,6 +55,9 @@ seed: setup ## Load brand rules from data/brand_library/*.json into the database
 sync-auth: setup ## List every ENGANO account under Supabase Authentication → Users (needs SUPABASE_SECRET_KEY in .env)
 	$(PY) -m engano_backend.sync_auth
 
+demo: ## Serve the demo video page at http://127.0.0.1:8765/ (Ctrl+C stops it)
+	python3 docs/demo/serve.py docs/demo 8765
+
 start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Discord, Gmail, tunnel + webhook (Ctrl+C stops all)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' INT TERM; \
 	if [ "$(AI_PROVIDER)" = ollama ]; then $(MAKE) --no-print-directory ollama & fi; \

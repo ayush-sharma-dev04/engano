@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENGANO demo</title>
+<style>
+  :root { --bg:#0b0b0e; --panel:#15151b; --line:#2a2a33; --text:#f1f1f5; --muted:#9d9dad; --accent:#8b5cf6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.55 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { margin: 0 0 4px; font-size: 1.9rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  video { width:100%; border-radius:14px; background:#000; border:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns: 1fr; gap: 24px; margin-top: 24px; }
+  @media (min-width: 900px) { .grid { grid-template-columns: 280px 1fr; } }
+  h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  ul { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .chapters button { width:100%; text-align:left; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); }
+  .chapters button:hover, .chapters button.on { border-color: var(--accent); background:#1d1730; }
+  .t { display:inline-block; min-width:3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .transcript p { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; border-left: 3px solid transparent; }
+  .transcript p.on { background: var(--panel); border-left-color: var(--accent); }
+  .transcript button { border:0; background:none; color: var(--accent); padding:0 6px 0 0; font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+  .note { margin-top: 24px; padding: 14px 16px; border:1px solid var(--line); border-radius:12px; background:var(--panel); color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>ENGANO demo</h1>
+  <p class="sub">A real recording of the running app, narrated. 3:03 long. Click a chapter or a line of the transcript to jump there.</p>
+  <video id="v" controls preload="metadata" poster="poster.jpg" src="engano-demo.mp4"></video>
+  <div class="grid">
+    <nav class="chapters" aria-label="Chapters"><h2>Chapters</h2><ul>
+<li><button data-t="0.0"><span class="t">0:00</span>Intro</button></li>
+<li><button data-t="11.16"><span class="t">0:11</span>The problem</button></li>
+<li><button data-t="24.68"><span class="t">0:24</span>Brand manager sets up</button></li>
+<li><button data-t="51.8"><span class="t">0:51</span>Creator drafts</button></li>
+<li><button data-t="89.68"><span class="t">1:29</span>Images</button></li>
+<li><button data-t="100.68"><span class="t">1:40</span>Website check</button></li>
+<li><button data-t="121.21"><span class="t">2:01</span>Reviewer decides</button></li>
+<li><button data-t="143.77"><span class="t">2:23</span>Fix and resubmit</button></li>
+<li><button data-t="154.17"><span class="t">2:34</span>Manager overview</button></li>
+<li><button data-t="168.37"><span class="t">2:48</span>Where it stands</button></li>
+    </ul></nav>
+    <section class="transcript" aria-label="Transcript"><h2>Transcript</h2>
+<p data-t="0.5" data-e="10.1"><button data-t="0.5">0:00</button> ENGANO checks content against a brand&#x27;s own rules before anything is published. It explains every problem, cites where the rule came from, and leaves the decision to people.</p>
+<p data-t="11.7" data-e="23.6"><button data-t="11.7">0:11</button> Employees, agencies and AI tools publish fast. Wrong facts, retired offers, off-brand tone and unreadable visuals slip out before anyone notices. ENGANO is the check that happens first.</p>
+<p data-t="24.9" data-e="30.2"><button data-t="24.9">0:24</button> A brand manager signs up and creates a brand. Creators choose a brand to write for.</p>
+<p data-t="30.6" data-e="33.4"><button data-t="30.6">0:30</button> Each workspace gets its own join code.</p>
+<p data-t="33.8" data-e="40.5"><button data-t="33.8">0:33</button> And its own rules. Here the manager writes a don&#x27;t: never use the word cheap. ENGANO enforces it exactly.</p>
+<p data-t="40.9" data-e="47.0"><button data-t="40.9">0:40</button> Reviewers can&#x27;t sign themselves up. The manager creates their account, and ENGANO generates the password.</p>
+<p data-t="47.4" data-e="50.7"><button data-t="47.4">0:47</button> The manager can also post an assignment with a deadline.</p>
+<p data-t="52.0" data-e="56.7"><button data-t="52.0">0:52</button> A creator signs up, then joins the workspace with the code the manager shared.</p>
+<p data-t="57.1" data-e="63.4"><button data-t="57.1">0:57</button> The studio is where drafts are checked. This one has a banned word, a wrong fact and a retired offer.</p>
+<p data-t="63.8" data-e="71.9"><button data-t="63.8">1:03</button> Specialised agents run at once: terminology, claims, tone, legal and accessibility. Problems are underlined in place.</p>
+<p data-t="72.3" data-e="78.1"><button data-t="72.3">1:12</button> Every finding names the rule or approved fact behind it. The manager&#x27;s own rule is enforced here too.</p>
+<p data-t="78.5" data-e="83.2"><button data-t="78.5">1:18</button> Fixes are suggestions the creator accepts. Nothing is changed behind their back.</p>
+<p data-t="83.6" data-e="88.5"><button data-t="83.6">1:23</button> Problems remain, so this draft can&#x27;t clear itself. It goes to a human reviewer.</p>
+<p data-t="89.9" data-e="99.5"><button data-t="89.9">1:29</button> Images are checked too. ENGANO reads the text in the picture, measures real contrast from the pixels, and notices when there is no description for screen readers.</p>
+<p data-t="100.9" data-e="114.8"><button data-t="100.9">1:40</button> A creator can paste a website address. ENGANO opens it in a real browser, scrolls the whole page and back, tests the links, tries a phone-sized screen and measures accessibility. This takes about a minute, so we skip ahead.</p>
+<p data-t="111.9" data-e="120.1"><button data-t="111.9">1:51</button> Where ENGANO can&#x27;t see the site, or something is broken, it says what is wrong and what the site&#x27;s owner must fix. It doesn&#x27;t just suggest small edits.</p>
+<p data-t="121.4" data-e="126.8"><button data-t="121.4">2:01</button> The reviewer signs in with the account the manager created, and sees only their workspace&#x27;s queue.</p>
+<p data-t="127.2" data-e="132.3"><button data-t="127.2">2:07</button> Each draft arrives with ENGANO&#x27;s findings, their sources and suggested corrections.</p>
+<p data-t="132.7" data-e="136.1"><button data-t="132.7">2:12</button> They approve, or reject with a note the creator can act on.</p>
+<p data-t="136.5" data-e="142.6"><button data-t="136.5">2:16</button> A reviewer can add a WhatsApp number or Discord ID in settings, and review requests arrive there too.</p>
+<p data-t="144.0" data-e="147.9"><button data-t="144.0">2:24</button> The creator sees the reviewer&#x27;s note, fixes the draft and resubmits.</p>
+<p data-t="148.3" data-e="153.0"><button data-t="148.3">2:28</button> This time nothing is left to fix. ENGANO clears it without bothering a reviewer.</p>
+<p data-t="154.4" data-e="164.0"><button data-t="154.4">2:34</button> The manager never reviews drafts. They watch the whole picture: where content stands, who sends what, what reviewers decided, and which problems keep repeating.</p>
+<p data-t="164.4" data-e="167.2"><button data-t="164.4">2:44</button> And every approved draft is here, read only.</p>
+<p data-t="168.9" data-e="182.7"><button data-t="168.9">2:48</button> That is the working product: three roles, a multi-agent review engine, image and website checks, and human control throughout. Still to build: revision history, brand library management for facts and terminology, and document import.</p>
+    </section>
+  </div>
+  <p class="note">The last chapter lists what is still to build: revision history and comments, a brand library for facts and terms, document import, a guideline-ambiguity insight and an AI-use disclosure page.</p>
+</main>
+<script>
+  const v = document.getElementById('v');
+  document.querySelectorAll('[data-t]').forEach((el) => el.addEventListener('click', (e) => {
+    if (el.tagName !== 'BUTTON') return;
+    v.currentTime = parseFloat(el.dataset.t); v.play(); e.stopPropagation();
+  }));
+  const chapterBtns = [...document.querySelectorAll('.chapters button')];
+  const lines = [...document.querySelectorAll('.transcript p')];
+  v.addEventListener('timeupdate', () => {
+    const t = v.currentTime;
+    let cur = -1; chapterBtns.forEach((b, i) => { if (parseFloat(b.dataset.t) <= t) cur = i; });
+    chapterBtns.forEach((b, i) => b.classList.toggle('on', i === cur));
+    lines.forEach((p) => p.classList.toggle('on', t >= parseFloat(p.dataset.t) && t < parseFloat(p.dataset.e)));
+  });
+</script>
+</body>
+</html>

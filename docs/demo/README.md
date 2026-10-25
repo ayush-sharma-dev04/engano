@@ -6,3 +6,5 @@ overview. It also shows image and website checks. The last card lists what is st
 
 `chapters.json` has the chapter times and the caption text. The build scripts (narration, voice, browser recording, assembly) live
 next to the submission files in `submission/round2/build/`, outside this repository.
+
+`make demo` serves `index.html` (player, chapters, transcript) at http://127.0.0.1:8765/. `serve.py` supports video seeking.
