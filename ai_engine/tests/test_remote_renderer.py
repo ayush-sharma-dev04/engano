@@ -67,7 +67,7 @@ def test_a_stopped_renderer_says_how_to_start_it():
 def test_oversized_answers_are_trimmed():
     huge = {**GOOD, "text": "x" * 500_000, "title": "t" * 5000, "screenshots": [PNG] * 9}
     site = remote(lambda r: httpx.Response(200, json=huge))
-    assert len(site.text) <= site_render.MAX_TEXT_CHARS and len(site.title) <= 300 and len(site.screenshots) <= 3
+    assert len(site.text) <= site_render.MAX_TEXT_CHARS and len(site.title) <= 300 and len(site.screenshots) == site_render.MAX_SCREENSHOTS + 1
 
 
 def test_the_backend_still_refuses_internal_addresses_before_calling_the_renderer(monkeypatch):

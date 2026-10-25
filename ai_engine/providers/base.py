@@ -4,7 +4,7 @@ Defines the contract for LLM-backed review providers (Gemini, Ollama, and RulesO
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import Finding
@@ -57,6 +57,13 @@ class BaseProvider(ABC):
         """
         return None
 
+
+    def check_guidelines(self, content_text: str, rules: List[Tuple[str, str]]) -> Optional[dict]:
+        """Judge a draft against free-text workspace rules: {rule number: {verdict, quote, reason}}.
+
+        None means this provider cannot judge (e.g. rules-only); the rules then stay unchecked.
+        """
+        return None
 
     def understand_image(
         self,

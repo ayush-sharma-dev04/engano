@@ -17,6 +17,7 @@ class FindingCategory(str, Enum):
     TONE_MISMATCH = "tone_mismatch"
     VISUAL_WCAG = "visual_wcag"
     LEGAL = "legal"
+    BRAND_GUIDELINE = "brand_guideline"
 
 
 class FindingSeverity(str, Enum):

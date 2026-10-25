@@ -1,11 +1,13 @@
+import asyncio
 import logging
 import os
 import secrets
 import uuid
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 from ai_engine.config import EngineConfig, get_engine_config
@@ -22,6 +24,10 @@ from engano_whatsapp.router import build_router as build_whatsapp_router
 
 from .escalation import EscalationSettings
 from .review_service import ReviewService, ReviewSettings
+from .auth_mirror import AuthMirror
+from .notify import ReviewerNotifier
+from .team_api import build_router as build_team_router
+from .team_store import TeamStore
 from .website import SiteError
 
 log = logging.getLogger("engano.backend")
@@ -91,8 +97,14 @@ def create_app(
     linkedin_store: TokenStore | None = None,
     engine_config: EngineConfig | None = None,
     escalation: EscalationSettings | None = None,
+    team_store: TeamStore | None = None,
+    auth_mirror: AuthMirror | None = None,
+    notifier: ReviewerNotifier | None = None,
 ) -> FastAPI:
     escalation = escalation or EscalationSettings.from_env()
+    team_store = team_store or TeamStore(
+        os.getenv("ENGANO_DB_PATH") or Path(__file__).resolve().parent.parent / ".data" / "engano.db"
+    )
     review_service = review_service or ReviewService(ReviewSettings.from_env())
 
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()
@@ -119,8 +131,9 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
-        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["X-Review-Receipt"],
     )
 
     async def require_brand_memory_key(
@@ -147,18 +160,33 @@ def create_app(
         }
 
     @app.post("/api/review", response_model=ReviewResult)
-    async def review(request: ReviewRequest):
+    async def review(request: ReviewRequest, response: Response, authorization: str | None = Header(default=None)):
         """Run the full multi-agent review on a draft for the configured brand."""
+        # A creator signed in to a workspace is also checked against that workspace's own DO/DON'T rules.
+        token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
+        me = team_store.account_for(token)
+        _, rules, scope = team_store.review_scope(me["id"]) if me else (None, [], "")
         try:
-            return await review_service.review_text(
+            result = await review_service.review_text(
                 request.draft_id or f"studio-{uuid.uuid4().hex[:12]}",
                 request.text,
                 answers=request.answers or None,
                 images=[(i.data, i.alt_text) for i in request.images] or None,
+                workspace_rules=rules or None,
             )
         except Exception:
             log.exception("Review failed")
             raise HTTPException(status_code=503, detail="Review is unavailable. Try again shortly.")
+        # A signed note that ENGANO reviewed exactly this text and found nothing to fix. A creator's
+        # submission is only cleared without a human if it carries a valid one.
+        clean = (
+            result.decision.status.value == "GREEN"
+            and not result.questions
+            and all(f.severity.value == "low" for f in result.findings)
+            and not request.images
+        )
+        response.headers["X-Review-Receipt"] = team_store.make_receipt(request.text, clean, scope)
+        return result
 
     @app.post("/api/check-website", response_model=SiteCheckResponse)
     async def check_website(request: SiteRequest):
@@ -231,6 +259,11 @@ def create_app(
             log.exception("Failed to persist brand memory")
             raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
+    app.include_router(build_team_router(
+            team_store,
+            auth_mirror or AuthMirror.from_env(),
+            notifier or ReviewerNotifier.from_env(whatsapp_client, whatsapp_settings.graph_version),
+        ))
     app.include_router(
         build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client, escalation),
         prefix="/api/webhooks/whatsapp",

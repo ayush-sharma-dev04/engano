@@ -8,6 +8,13 @@ export type ReviewSubmission = {
   status: 'Pending Review' | 'Approved' | 'Changes Requested'
   submittedAt: string
   reviewerComment?: string
+  // Workspace flow: who wrote it, where it belongs, who cleared it.
+  workspaceId?: number | null
+  creatorId?: string
+  approvedBy?: 'AI' | 'Reviewer' | 'Brand Manager'
+  published?: boolean
+  aiStatus?: 'GREEN' | 'YELLOW' | 'RED'
+  at?: number
 }
 
 type ReviewQueueProps = {

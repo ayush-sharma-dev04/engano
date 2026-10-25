@@ -234,6 +234,30 @@ class OllamaProvider(BaseProvider):
 
         return _clean_rewrite_output(raw_text)
 
+    def check_guidelines(self, content_text, rules):
+        """One rule per question: a small local model judges a single rule far better than a list."""
+        from ai_engine.agents.specialists.guideline_specialist import guideline_prompt, parse_guideline_verdicts
+
+        verdicts = {}
+        for number, rule in enumerate(rules, 1):
+            payload = {
+                "model": self.model,
+                "prompt": guideline_prompt(content_text, [rule]),
+                "format": "json",
+                "stream": False,
+                "keep_alive": "1h",
+                "options": {"temperature": 0.0},
+            }
+            try:
+                resp = self._client.post(f"{self.base_url}/api/generate", json=payload)
+                resp.raise_for_status()
+                answer = parse_guideline_verdicts(resp.json().get("response", "")).get(1)
+            except Exception as exc:
+                raise RuntimeError("the model could not check the workspace rules") from exc
+            if answer:
+                verdicts[number] = answer
+        return verdicts
+
     def understand_image(self, image_b64, alt_text, width, height):
         from ai_engine.vision.understand import build_prompt, parse_understanding
 

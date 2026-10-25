@@ -21,7 +21,7 @@ from ai_engine.memory.store import (
     get_brand_memory_store,
 )
 from ai_engine.schemas.brand_memory import BrandMemory
-from ai_engine.schemas.payload import ChannelType, DraftPayload, ImageItem
+from ai_engine.schemas.payload import ChannelType, DraftPayload, ImageItem, WorkspaceRule
 from ai_engine.schemas.review import ReviewDecision, ReviewInput, ReviewResult
 
 from .env import REPO_ROOT, ROOT_ENV
@@ -69,6 +69,9 @@ def make_repository(settings: ReviewSettings) -> BasePolicyRepository:
 SITE_FACTS_SHOWN = (
     "title", "description", "lang", "h1", "images", "imagesMissingAlt", "animatedElements",
     "reducedMotionSupport", "fonts",
+    # What ENGANO did and understood, shown to the creator.
+    "outline", "navLinks", "ctas", "scrolledScreens", "reachedBottom", "backAtTop", "linksChecked", "brokenLinkCount",
+    "mobileChecked", "mobileOverflowPx", "httpStatus", "forms",
 )
 
 
@@ -133,6 +136,7 @@ class ReviewService:
         brand_id: Optional[str] = None,
         answers: Optional[Dict[str, str]] = None,
         images: Optional[list] = None,
+        workspace_rules: Optional[list] = None,
     ) -> ReviewResult:
         """Review text for an explicitly resolved brand.
 
@@ -140,10 +144,12 @@ class ReviewService:
         rewrite lifecycle; memory is fetched for the same resolved brand.
         """
         resolved_brand = self.resolve_brand_id(brand_id)
-        if answers or images:
+        if answers or images or workspace_rules:
             request: DraftPayload | ReviewInput = await self.payload_with_answers(
                 draft_id, resolved_brand, text, answers or {}, images
             )
+            # The workspace's own rules come from the server, never from the client.
+            request.workspace_rules = [WorkspaceRule(type=r["type"], text=r["text"]) for r in (workspace_rules or [])]
         else:
             request = ReviewInput(draft_id=draft_id, brand_id=resolved_brand, content_text=text)
         memory = self.get_brand_memory(resolved_brand)

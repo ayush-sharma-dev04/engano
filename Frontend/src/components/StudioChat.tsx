@@ -21,6 +21,55 @@ const VERDICT = {
   GREEN: { title: 'Ready to publish', tone: 'border-emerald-500/40 bg-emerald-500/10' },
 } as const
 
+/** What ENGANO did on a website and what it made of it, from the facts it measured. */
+function SiteReport({ site }: { site: SiteInfo }) {
+  const f = site.facts as Record<string, unknown>
+  const num = (k: string) => (typeof f[k] === 'number' ? (f[k] as number) : 0)
+  const list = (k: string): string[] => (Array.isArray(f[k]) ? (f[k] as unknown[]).map(String) : [])
+  const did: string[] = []
+  if (num('scrolledScreens')) did.push(`Scrolled through ${num('scrolledScreens')} screen(s) from top to bottom${f.backAtTop === false ? ' (it would not scroll back up)' : ' and back up'}`)
+  if (num('linksChecked')) did.push(`Tested ${num('linksChecked')} links: ${num('brokenLinkCount') ? `${num('brokenLinkCount')} broken` : 'none broken'}`)
+  if (f.mobileChecked) did.push(num('mobileOverflowPx') > 4 ? `Opened it phone-sized: it is ${num('mobileOverflowPx')}px too wide` : 'Opened it phone-sized: it fits the screen')
+  if (num('httpStatus')) did.push(`The address answered with HTTP ${num('httpStatus')}`)
+  const outline = list('outline')
+  const nav = list('navLinks')
+  const ctas = list('ctas')
+  if (!did.length && !outline.length) return null
+  return (
+    <div className="grid gap-4 rounded-xl border border-white/10 bg-black/20 p-4 text-sm sm:grid-cols-2">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">What ENGANO did</p>
+        <ul className="mt-1.5 list-disc space-y-1 pl-5 text-slate-200">
+          {did.map((d) => (
+            <li key={d}>{d}</li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">What it found on the page</p>
+        {outline.length > 0 && (
+          <p className="mt-1.5 text-slate-200">
+            <span className="text-slate-400">Headings: </span>
+            {outline.slice(0, 6).map((h) => h.replace(/^H(\d) /, '')).join(' · ')}
+          </p>
+        )}
+        {nav.length > 0 && (
+          <p className="mt-1 text-slate-200">
+            <span className="text-slate-400">Menu: </span>
+            {nav.slice(0, 8).join(' · ')}
+          </p>
+        )}
+        {ctas.length > 0 && (
+          <p className="mt-1 text-slate-200">
+            <span className="text-slate-400">Buttons: </span>
+            {ctas.slice(0, 6).join(' · ')}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const DOT = { Critical: 'bg-red-500', Warning: 'bg-amber-300', Suggestion: 'bg-sky-400' } as const
 
 type Props = {
@@ -56,6 +105,7 @@ type Props = {
   onAnswer: (answers: Record<string, string>) => void
   onCancel: () => void
   onSubmit: () => void
+  submitLabel?: string
 }
 
 /** Enough rows for the text at the bubble's width (about 68 characters per line). */
@@ -258,6 +308,7 @@ function LinkedBlock({ linked }: { linked: Linked }) {
             alt={`Screenshot of ${linked.site.url}`}
             className="max-h-56 w-full rounded-xl object-cover object-top ring-1 ring-white/10"
           />
+          <SiteReport site={linked.site} />
           {linked.site.designNotes.length > 0 && (
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Design suggestions (AI advice)</p>
@@ -546,6 +597,7 @@ export default function StudioChat(props: Props) {
                   className="mt-3 w-full rounded-xl ring-1 ring-white/10"
                 />
               )}
+              {props.site && <div className="mt-3"><SiteReport site={props.site} /></div>}
             </div>
           ) : null}
           {props.title.trim() && !props.siteMode && <p className="mb-1 text-xs font-medium text-slate-400">{props.title}</p>}
@@ -605,7 +657,7 @@ export default function StudioChat(props: Props) {
                 )}
 
                 <div className={`rounded-2xl border p-5 ${VERDICT[summary.status].tone}`}>
-                  <h3 className="text-lg font-semibold">{VERDICT[summary.status].title}</h3>
+                  <h3 className="text-lg font-semibold">{props.site && summary.status === 'RED' ? 'Fix these before it can pass' : VERDICT[summary.status].title}</h3>
                   {summary.reason && <p className="mt-1 text-sm text-slate-300">{summary.reason}</p>}
                   {summary.question && summary.questions.length === 0 && (
                     <p className="mt-2 text-sm text-slate-300">{summary.question}</p>
@@ -711,7 +763,7 @@ export default function StudioChat(props: Props) {
                     )}
                   </div>
                   <button onClick={props.onSubmit} className="btn-primary px-5 py-2.5 text-sm">
-                    Submit for Review
+                    {props.submitLabel ?? 'Submit for Review'}
                   </button>
                 </div>
               </div>

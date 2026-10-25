@@ -50,6 +50,12 @@ class VisualMetadata(BaseModel):
     logo_clear_space_met: Optional[bool] = Field(default=None, description="True if logo margins are met")
 
 
+class WorkspaceRule(BaseModel):
+    """A DO or DON'T the brand manager wrote for one workspace (free text)."""
+    type: str = Field(description="DO or DON'T")
+    text: str = Field(description="The rule, in the manager's own words")
+
+
 class DraftPayload(BaseModel):
     """Canonical normalized payload ingested across all supported channels."""
     draft_id: str = Field(description="Unique draft or message identifier")
@@ -72,6 +78,10 @@ class DraftPayload(BaseModel):
     website_url: Optional[str] = Field(default=None, description="Company website the creator gave (already fetched)")
     website_text: Optional[str] = Field(default=None, description="Readable text fetched from website_url")
     website_error: Optional[str] = Field(default=None, description="Why the website could not be read, if so")
+    workspace_rules: List[WorkspaceRule] = Field(
+        default_factory=list,
+        description="The workspace's own DO/DON'T rules. Set by the server only, never taken from a client.",
+    )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Preserved source channel metadata (untrusted, cannot override trusted config)",

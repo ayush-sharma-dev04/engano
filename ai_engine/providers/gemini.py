@@ -258,6 +258,15 @@ class GeminiProvider(BaseProvider):
             clean = clean[:-3].rstrip()
         return clean.strip() or None
 
+    def check_guidelines(self, content_text, rules):
+        from ai_engine.agents.specialists.guideline_specialist import guideline_prompt, parse_guideline_verdicts
+
+        try:
+            resp = self._client.models.generate_content(model=self.model, contents=guideline_prompt(content_text, rules))
+            return parse_guideline_verdicts(resp.text if hasattr(resp, "text") else str(resp))
+        except Exception as exc:
+            raise RuntimeError("the model could not check the workspace rules") from exc
+
     def understand_image(self, image_b64, alt_text, width, height):
         import base64
 

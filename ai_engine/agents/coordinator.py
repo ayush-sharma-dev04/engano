@@ -24,6 +24,7 @@ from ai_engine.agents.decision import DecisionAgent, route_decision
 from ai_engine.agents.evidence_validation import EvidenceValidationAgent
 from ai_engine.agents.policy_analysis import PolicyAnalysisAgent
 from ai_engine.agents.rewrite import RewriteAgent
+from ai_engine.agents.specialists.guideline_specialist import GuidelineSpecialist
 from ai_engine.agents.specialists.base import BaseSpecialist
 from ai_engine.agents.specialists.claims_specialist import ClaimsSpecialist
 from ai_engine.agents.specialists.legal_policy_specialist import LegalPolicySpecialist
@@ -97,6 +98,7 @@ class CoordinatorAgent:
         self.image_analyzer = ImageAnalyzer(self.provider)
         self.image_specialist = ImageAnalysisSpecialist()
         self.website_specialist = WebsiteSpecialist()
+        self.guideline_specialist = GuidelineSpecialist(provider=self.provider)
 
         # Specialists
         self.rules_specialist = RulesSpecialist()
@@ -220,6 +222,8 @@ class CoordinatorAgent:
                 self.claims_specialist,
                 self.legal_specialist,
             ])
+            if payload.workspace_rules:
+                concurrent_specialists.append(self.guideline_specialist)
 
         # Visual specialist runs when images or visual metadata exist
         if payload.has_images_or_visuals:
@@ -313,6 +317,18 @@ class CoordinatorAgent:
         # 7. Decision Routing (Precedence: RED > YELLOW > GREEN, strict mode)
         agents_executed.append("DecisionRouting")
         decision = self.decision_agent.evaluate(unique_findings)
+        owner_must_fix = False
+        if is_website and decision.status == ReviewDecision.RED:
+            serious = [f for f in unique_findings if f.severity in (FindingSeverity.HIGH, FindingSeverity.CRITICAL)]
+            if serious and all(f.highlighted_text.startswith("[Website]") for f in serious):
+                # The site's own problems: its owner has to fix them, it is not a judgement call for a reviewer.
+                decision = DecisionOutcome(
+                    status=ReviewDecision.RED,
+                    action_required_by=ActionRequiredBy.CREATOR_QUESTION,
+                    clarification_question="Fix the problems listed, then check the page again.",
+                    reason="Not ready: the website has problems its owner must fix before it can pass.",
+                )
+                owner_must_fix = True
         if questions and decision.status == ReviewDecision.GREEN:
             # Not sure yet: never report "ready to publish" while questions are open.
             decision = DecisionOutcome(
@@ -336,7 +352,7 @@ class CoordinatorAgent:
 
         # STRICT SAFETY CONTRACT: A rewrite agent must NEVER override a RED decision.
         # A previously blocked draft must not become approved simply because a rewrite was generated.
-        if decision.status == ReviewDecision.RED:
+        if decision.status == ReviewDecision.RED and not owner_must_fix:
             # Overall decision stays strictly RED requiring reviewer approval
             decision.action_required_by = ActionRequiredBy.REVIEWER_APPROVAL
         elif rewrite_proposal.requires_clarification and decision.status == ReviewDecision.YELLOW:

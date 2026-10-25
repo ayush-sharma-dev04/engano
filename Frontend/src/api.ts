@@ -44,6 +44,8 @@ export type ReviewSummary = {
   question: string | null
   rewrite: string | null
   questions: Question[]
+  // Signed proof from the server that exactly this text was reviewed; submissions need it to skip a human.
+  receipt: string | null
 }
 
 const SEVERITY: Record<ApiFinding['severity'], Finding['severity']> = {
@@ -64,18 +66,20 @@ const CATEGORY: Record<string, string> = {
   tone_mismatch: 'Tone',
   visual_wcag: 'Accessibility',
   legal: 'Legal',
+  brand_guideline: 'Brand Guideline',
 }
 
 export async function reviewDraft(
   text: string,
   answers: Record<string, string> = {},
-  images: { data: string; alt_text: string }[] = []
+  images: { data: string; alt_text: string }[] = [],
+  token: string | null = null
 ): Promise<{ findings: Finding[]; summary: ReviewSummary }> {
   let response: Response
   try {
     response = await fetch(`${API_URL}/api/review`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({
         text,
         ...(Object.keys(answers).length ? { answers } : {}),
@@ -88,7 +92,8 @@ export async function reviewDraft(
   if (!response.ok) {
     throw new Error(response.status === 422 ? 'The draft is empty or too long (max 10,000 characters).' : 'The review service is unavailable. Try again shortly.')
   }
-  return mapResult((await response.json()) as ApiResult)
+  const mapped = mapResult((await response.json()) as ApiResult)
+  return { ...mapped, summary: { ...mapped.summary, receipt: response.headers.get('X-Review-Receipt') } }
 }
 
 function mapResult(data: ApiResult): { findings: Finding[]; summary: ReviewSummary } {
@@ -130,6 +135,7 @@ function mapResult(data: ApiResult): { findings: Finding[]; summary: ReviewSumma
         choices: q.choices ?? [],
         about: q.about ?? null,
       })),
+      receipt: null,
     },
   }
 }

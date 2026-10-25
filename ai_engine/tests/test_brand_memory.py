@@ -29,6 +29,7 @@ from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.payload import DraftPayload
 from ai_engine.schemas.review import ReviewDecision
 from engano_backend.app import create_app
+from engano_backend.team_store import TeamStore
 from engano_backend.review_service import ReviewService, ReviewSettings
 
 
@@ -723,6 +724,7 @@ def test_backend_brand_memory_api_endpoints(temp_memory_dir: Path, nimbus_policy
     app = create_app(
         review_service=service,
         engine_config=EngineConfig(brand_memory_api_key="backend-test-key"),
+        team_store=TeamStore(temp_memory_dir.parent / "team.db"),
     )
     client = TestClient(app)
 
@@ -763,6 +765,7 @@ def test_backend_brand_memory_api_is_disabled_without_server_key(temp_memory_dir
         create_app(
             review_service=service,
             engine_config=EngineConfig(brand_memory_api_key=None),
+            team_store=TeamStore(temp_memory_dir.parent / "team.db"),
         )
     )
 
@@ -781,6 +784,7 @@ def test_backend_brand_memory_api_rejects_wrong_server_key(temp_memory_dir: Path
         create_app(
             review_service=service,
             engine_config=EngineConfig(brand_memory_api_key="backend-test-key"),
+            team_store=TeamStore(temp_memory_dir.parent / "team.db"),
         )
     )
 
@@ -812,6 +816,7 @@ def test_backend_brand_memory_api_does_not_return_storage_error_details(
         create_app(
             review_service=service,
             engine_config=EngineConfig(brand_memory_api_key="backend-test-key"),
+            team_store=TeamStore(tmp_path / "team.db"),
         )
     )
 

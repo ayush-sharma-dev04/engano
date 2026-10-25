@@ -52,6 +52,9 @@ migrate-status: setup ## Show which migrations are applied and which are pending
 seed: setup ## Load brand rules from data/brand_library/*.json into the database (APPLY=1 to write; default is a dry run)
 	$(PY) supabase/seed.py $(if $(APPLY),--apply)
 
+sync-auth: setup ## List every ENGANO account under Supabase Authentication → Users (needs SUPABASE_SECRET_KEY in .env)
+	$(PY) -m engano_backend.sync_auth
+
 start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Discord, Gmail, tunnel + webhook (Ctrl+C stops all)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' INT TERM; \
 	if [ "$(AI_PROVIDER)" = ollama ]; then $(MAKE) --no-print-directory ollama & fi; \

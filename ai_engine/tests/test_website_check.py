@@ -23,6 +23,12 @@ CLEAN_FACTS = {
     "title": "Nimbus DB", "lang": "en", "description": "A database", "h1": 1, "images": 2, "imagesMissingAlt": 0,
     "missingAltExamples": [], "autoplayWithSound": 0, "autoplayMovingNoControls": 0, "animatedElements": 0,
     "transitionElements": 0, "reducedMotionSupport": False, "legacyMotion": 0, "fonts": {"Inter": 20}, "viewportMeta": True,
+    "contrastChecked": 40, "contrastFails": 0, "contrastExamples": [], "unlabelledFields": 0, "unnamedButtons": 0,
+    "unnamedLinks": 0, "vagueLinks": 0, "headingSkips": 0, "tinyText": 0, "insecure": False, "zoomBlocked": False,
+    "iframesNoTitle": 0, "smallTargets": 0, "hasMain": True,
+    "httpStatus": 200, "blocked": "", "loginWall": False, "nearlyEmpty": False, "brokenLinkCount": 0, "linksChecked": 12,
+    "brokenImages": 0, "pageErrors": 0, "consoleErrors": 0, "badResponses": 0, "mobileChecked": True, "mobileOverflowPx": 0,
+    "scrolledScreens": 5, "reachedBottom": True, "backAtTop": True,
 }
 
 
@@ -69,6 +75,32 @@ def test_a_clean_site_has_no_website_findings(repo):
     ({"h1": 0}, "No main heading"),
     ({"lang": ""}, "Missing page language"),
     ({"viewportMeta": False}, "Not set up for mobile"),
+    ({"insecure": True}, "Not served over HTTPS"),
+    ({"contrastFails": 2, "contrastExamples": [{"text": "Buy", "ratio": 2.1, "fg": "#AAAAAA", "bg": "#FFFFFF"}]}, "Low text contrast"),
+    ({"unlabelledFields": 1}, "Form fields without labels"),
+    ({"unnamedButtons": 1}, "Buttons or links with no name"),
+    ({"unnamedLinks": 2}, "Buttons or links with no name"),
+    ({"vagueLinks": 3}, "Vague link text"),
+    ({"headingSkips": 1}, "Heading levels skipped"),
+    ({"iframesNoTitle": 1}, "Embedded frames without a title"),
+    ({"zoomBlocked": True}, "Zooming is blocked"),
+    ({"tinyText": 3}, "Text smaller than 12px"),
+    ({"smallTargets": 1}, "Buttons too small to tap"),
+    ({"h1": 2}, "More than one main heading"),
+    ({"hasMain": False}, "No main landmark"),
+    ({"description": ""}, "No page description"),
+    ({"stillLoading": True, "settleSeconds": 25}, "Still on a loading screen"),
+    ({"settleSeconds": 7}, "Slow to show content"),
+    ({"httpStatus": 503}, "Page returns an error"),
+    ({"blocked": "just a moment"}, "Site blocks ENGANO's checker"),
+    ({"loginWall": True}, "Page needs a login"),
+    ({"nearlyEmpty": True}, "Page is almost empty"),
+    ({"brokenLinkCount": 2, "brokenLinks": ["404 https://a/x", "0 https://b/y"]}, "Broken links"),
+    ({"brokenImages": 1, "brokenImageExamples": ["https://a/x.png"]}, "Images that fail to load"),
+    ({"pageErrors": 1, "pageErrorExamples": ["TypeError: x is undefined"]}, "Errors in the page's code"),
+    ({"badResponses": 3, "consoleErrors": 3, "badResponseExamples": ["404 https://a/app.js"]}, "Resources fail to load"),
+    ({"mobileOverflowPx": 120}, "Layout breaks on phones"),
+    ({"backAtTop": False}, "Page does not scroll back to the top"),
 ])
 def test_each_measured_problem_becomes_a_finding(repo, facts, expected):
     assert f"[Website] {expected}" in titles(check(repo, facts))
@@ -79,12 +111,14 @@ def test_animations_are_fine_when_reduced_motion_is_respected(repo):
 
 
 def test_fonts_are_only_checked_when_the_brand_has_fonts(repo):
-    facts = {"fonts": {"Comic Neue": 12, "Inter": 30, "Georgia": 9}}
+    facts = {"fonts": {"Comic Neue": 12, "Inter": 30, "Georgia": 9, "sans-serif": 40}}
     assert titles(check(repo, facts)) == []
     repo.get_policy("nimbus_cloud").visual_style.fonts.append("Inter")
     result = check(repo, facts)
     f = next(f for f in result.findings if f.highlighted_text == "[Website] Fonts outside the brand")
-    assert "Comic Neue" in f.explanation and "Georgia" not in f.explanation and "Inter (" not in f.explanation
+    # Strict: a named font that is not a brand font counts, even a common one. Only CSS keywords are exempt.
+    assert "Comic Neue" in f.explanation and "Georgia" in f.explanation
+    assert "Inter (" not in f.explanation and "sans-serif (" not in f.explanation
 
 
 def test_colours_outside_the_palette_are_flagged_only_with_a_palette(repo):
@@ -213,3 +247,57 @@ def test_websites_skip_the_slow_ai_second_opinion_but_keep_every_rule_check(repo
     assert Counting.reviewed == 0 and Counting.looked == 0           # no AI second opinion on page text, no per-screenshot look
     assert getattr(Counting, "rewrote", 0) == 0                      # and no AI rewrite of a whole website
     assert {"terminology", "wrong_fact"} <= {f.category.value for f in result.findings}
+
+
+def decision(result):
+    return result.decision.status.value
+
+
+def test_a_site_with_only_minor_problems_is_never_ready_to_publish(repo):
+    result = check(repo, {"description": ""})  # a single LOW finding
+    assert titles(result) == ["[Website] No page description"]
+    assert decision(result) == "YELLOW"
+
+
+def test_a_clean_site_is_still_ready(repo):
+    assert decision(check(repo, {})) == "GREEN"
+
+
+@pytest.mark.parametrize("facts", [
+    {"imagesMissingAlt": 1}, {"insecure": True}, {"zoomBlocked": True}, {"unlabelledFields": 1}, {"autoplayWithSound": 1},
+    {"contrastFails": 6, "contrastChecked": 10},
+])
+def test_serious_site_problems_need_a_reviewer(repo, facts):
+    result = check(repo, facts)
+    assert decision(result) == "RED"
+
+
+def test_a_few_contrast_failures_are_medium_and_many_are_high(repo):
+    few = next(f for f in check(repo, {"contrastFails": 2}).findings if f.highlighted_text == "[Website] Low text contrast")
+    many = next(f for f in check(repo, {"contrastFails": 5}).findings if f.highlighted_text == "[Website] Low text contrast")
+    assert (few.severity.value, many.severity.value) == ("medium", "high")
+
+
+def test_every_website_finding_says_what_is_wrong_and_what_to_fix(repo):
+    worst = {
+        "httpStatus": 500, "blocked": "captcha", "loginWall": True, "nearlyEmpty": True, "brokenLinkCount": 1, "brokenLinks": ["404 x"],
+        "brokenImages": 1, "pageErrors": 1, "mobileOverflowPx": 50, "imagesMissingAlt": 1, "contrastFails": 1, "unlabelledFields": 1,
+        "unnamedButtons": 1, "zoomBlocked": True, "insecure": True, "title": "", "h1": 0, "lang": "", "viewportMeta": False,
+    }
+    found = [f for f in check(repo, worst).findings if f.highlighted_text.startswith("[Website]")]
+    assert len(found) >= 12
+    for f in found:
+        assert f.explanation.startswith("Problem: ") and " Fix required: " in f.explanation, f.highlighted_text
+
+
+def test_a_site_that_cannot_be_seen_is_fixed_by_its_owner_not_judged_by_a_reviewer(repo):
+    result = check(repo, {"blocked": "access denied", "nearlyEmpty": True})
+    assert result.decision.status.value == "RED"
+    assert result.decision.action_required_by.value == "creator_question"
+    assert "must fix" in result.decision.reason
+
+
+def test_text_problems_still_go_to_a_reviewer_even_on_a_site_with_site_problems(repo):
+    result = check(repo, {"insecure": True}, text="NimbusDB has 100% uptime. Try it free forever.")
+    assert result.decision.status.value == "RED"
+    assert result.decision.action_required_by.value == "reviewer_approval"
