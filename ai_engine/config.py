@@ -103,6 +103,27 @@ class EngineConfig(BaseSettings):
         description="Backend-only key required by brand-memory management API endpoints"
     )
 
+    # Retrieval-augmented context (pgvector)
+    rag_enabled: bool = Field(
+        default=False,
+        alias="ENGANO_RAG_ENABLED",
+        description="Retrieve relevant policy/memory chunks and give them to the LLM as cited context"
+    )
+    rag_top_k: int = Field(default=6, alias="ENGANO_RAG_TOP_K", ge=1, le=20)
+    embedding_model: str = Field(
+        default="gemini-embedding-001",
+        alias="ENGANO_EMBEDDING_MODEL",
+        description="Gemini embedding model; output is truncated to 768 dims to match pgvector"
+    )
+
+    # Image analysis
+    vision_timeout_seconds: float = Field(
+        default=180.0,
+        alias="ENGANO_VISION_TIMEOUT",
+        description="Seconds to wait for the vision model to look at one image"
+    )
+    max_images: int = Field(default=4, alias="ENGANO_MAX_IMAGES", ge=1, le=10)
+
     # Execution and Review Parameters
     request_timeout_seconds: float = Field(
         default=120.0,

@@ -27,3 +27,23 @@ make setup
 make backend   # http://localhost:8000 (or `make start` for everything)
 make test
 ```
+
+## Where the data lives
+
+Accounts, workspaces, join codes, assignments, guidelines, drafts, every version of every draft, reviewer
+decisions and comments are stored in **Supabase Postgres** (tables from `supabase/migrations`, all with row
+level security on and no public policies, so only this backend can read them).
+
+```
+make migrate     # creates the tables (safe to run again)
+make move-data   # one-off: copies an existing local SQLite file (Backend/.data/engano.db) into Supabase
+```
+
+* `SUPABASE_DB_URL` set and `ENGANO_DB_PATH` not set: the backend uses Supabase.
+* `ENGANO_DB_PATH=/some/file.db`: the backend uses that SQLite file instead (tests, offline work).
+* Neither: a SQLite file at `Backend/.data/engano.db`.
+
+The database is a network hop away, so the backend asks for everything a person may see in one call
+(`engano_snapshot`) and keeps recent answers in memory until something is written.
+
+New accounts are also listed under Supabase Authentication → Users (see `auth_mirror.py`, `make sync-auth`).

@@ -6,8 +6,23 @@
     {
       "term_id": "term_nimbus_db",
       "approved_term": "Nimbus DB",
-      "prohibited_variants": ["NimbusDB", "Nimbus-DB"],
+      "prohibited_variants": [
+        "Nimbus Database",
+        "NimbusDatabase",
+        "Nimbus-DB",
+        "NimbusDB"
+      ],
       "replacement_suggestion": "Nimbus DB",
+      "case_sensitive": false
+    },
+    {
+      "term_id": "term_nimbus_cloud",
+      "approved_term": "Nimbus Cloud",
+      "prohibited_variants": [
+        "NimbusCloud",
+        "Nimbus-Cloud"
+      ],
+      "replacement_suggestion": "Nimbus Cloud",
       "case_sensitive": false
     }
   ],
@@ -16,14 +31,27 @@
     "rule_reference": "Rule 4.2",
     "superlative_patterns": [
       "fastest database in the world",
-      "fastest database",
+      "best database in the world",
+      "most reliable database",
+      "unbeatable performance",
+      "number one database",
       "best in the world",
-      "best database in the world"
+      "fastest database",
+      "industry-leading",
+      "world's fastest",
+      "best-in-class",
+      "#1 database"
     ],
     "forbidden_guarantees": [
-      "100% uptime",
       "guaranteed results",
-      "zero downtime"
+      "no downtime ever",
+      "never goes down",
+      "zero data loss",
+      "zero downtime",
+      "100% secure",
+      "100% uptime",
+      "unbreakable",
+      "risk-free"
     ],
     "permitted_benchmarks": [
       {
@@ -38,7 +66,10 @@
       "topic": "uptime_sla",
       "approved_fact": "Nimbus Cloud guarantees 99.95% monthly uptime SLA.",
       "suggested_correction": "99.95% uptime SLA",
-      "prohibited_claims": ["100% uptime", "100% SLA"],
+      "prohibited_claims": [
+        "100% uptime",
+        "100% SLA"
+      ],
       "validity_start": "2024-01-01",
       "validity_end": "2026-12-31",
       "is_active": true
@@ -69,15 +100,34 @@
       "is_retired": true,
       "validity_start": "2023-01-01",
       "validity_end": "2024-12-31",
-      "prohibited_phrases": ["free forever"]
+      "prohibited_phrases": [
+        "free forever"
+      ]
     }
   ],
   "tone_rules": [
     {
       "rule_id": "Rule 3.1",
       "description": "Tone must remain confident, professional, and clear without aggressive or unverified hype.",
-      "required_tones": ["confident", "professional", "clear"],
-      "prohibited_tones": ["aggressive hype", "unsubstantiated boasting"]
+      "required_tones": [
+        "confident",
+        "professional",
+        "clear"
+      ],
+      "prohibited_tones": [
+        "aggressive hype",
+        "unsubstantiated boasting"
+      ],
+      "prohibited_phrases": [
+        "act now",
+        "limited time only",
+        "last chance",
+        "don't miss out",
+        "hurry",
+        "just trust us",
+        "yeah right",
+        "so-called competitors"
+      ]
     }
   ],
   "accessibility_rules": {
@@ -89,10 +139,31 @@
     {
       "rule_id": "legal_disclaimer_sla",
       "requirement": "SLA claims must state terms and service tier.",
-      "required_disclaimers": ["Terms and conditions apply to service SLA."]
+      "required_disclaimers": [
+        "Terms and conditions apply to service SLA."
+      ],
+      "trigger_phrases": [
+        "SLA",
+        "uptime",
+        "service level"
+      ],
+      "restricted_claims": [
+        "fully compliant",
+        "guaranteed compliance",
+        "certified secure",
+        "unhackable"
+      ]
     }
   ],
   "test_fixtures": {
     "sample_draft": "NimbusDB is the fastest database in the world, with 100% uptime. Try it free forever and see why teams love it!"
+  },
+  "logo_rules": {
+    "require_brand_logo": false,
+    "approved_partners": []
+  },
+  "visual_style": {
+    "fonts": [],
+    "colors": []
   }
 }

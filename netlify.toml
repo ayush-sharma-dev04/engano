@@ -1,0 +1,34 @@
+# Hosting the web app on Netlify. The backend does not run here: it stays on your computer (see docs/hosting.md).
+#
+# Netlify reads this file from the repository root. The build command installs and builds the Frontend folder,
+# so no "base directory" setting is needed.
+
+[build]
+  command = "npm --prefix Frontend ci && npm --prefix Frontend run build"
+  publish = "Frontend/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Optional: a fixed backend address baked into the site (for a stable tunnel). Without it the site asks for the address
+  # on its sign-in page, and remembers it in the browser. Set it in Netlify's site settings, not here:
+  # VITE_API_URL = "https://your-backend.example.com"
+
+# One page app: every path serves index.html and the router takes over (so /queue/12 works when refreshed or shared).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Built files have content hashes in their names, so browsers can keep them for a year.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

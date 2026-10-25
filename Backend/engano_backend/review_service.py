@@ -1,9 +1,12 @@
 """Shared bridge from every channel (Discord, WhatsApp, ...) to ai_engine."""
 
 import asyncio
+import base64
+import io
 import logging
 import os
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from ai_engine import run_brand_review
@@ -18,10 +21,12 @@ from ai_engine.memory.store import (
     get_brand_memory_store,
 )
 from ai_engine.schemas.brand_memory import BrandMemory
-from ai_engine.schemas.payload import DraftPayload
+from ai_engine.schemas.payload import ChannelType, DraftPayload, ImageItem, WorkspaceRule
 from ai_engine.schemas.review import ReviewDecision, ReviewInput, ReviewResult
 
 from .env import REPO_ROOT, ROOT_ENV
+from .site_render import RenderedSite, render_site
+from .website import SiteError, fetch_site_text
 
 log = logging.getLogger("engano.review")
 
@@ -59,6 +64,28 @@ def make_repository(settings: ReviewSettings) -> BasePolicyRepository:
         log.warning("Using local test fixtures as the policy source. Not for production.")
         return repo
     return SupabasePolicyRepository()
+
+
+SITE_FACTS_SHOWN = (
+    "title", "description", "lang", "h1", "images", "imagesMissingAlt", "animatedElements",
+    "reducedMotionSupport", "fonts",
+    # What ENGANO did and understood, shown to the creator.
+    "outline", "navLinks", "ctas", "scrolledScreens", "reachedBottom", "backAtTop", "linksChecked", "brokenLinkCount",
+    "mobileChecked", "mobileOverflowPx", "httpStatus", "forms",
+)
+
+
+@dataclass
+class SiteCheck:
+    """Everything the studio shows after checking a website."""
+
+    url: str
+    title: str
+    screenshot: str  # small JPEG data URL
+    facts: Dict[str, Any]
+    design_notes: list
+    design_error: Optional[str]
+    result: ReviewResult
 
 
 class ReviewService:
@@ -103,7 +130,13 @@ class ReviewService:
         return resolved
 
     async def review_text(
-        self, draft_id: str, text: str, brand_id: Optional[str] = None
+        self,
+        draft_id: str,
+        text: str,
+        brand_id: Optional[str] = None,
+        answers: Optional[Dict[str, str]] = None,
+        images: Optional[list] = None,
+        workspace_rules: Optional[list] = None,
     ) -> ReviewResult:
         """Review text for an explicitly resolved brand.
 
@@ -111,7 +144,14 @@ class ReviewService:
         rewrite lifecycle; memory is fetched for the same resolved brand.
         """
         resolved_brand = self.resolve_brand_id(brand_id)
-        request = ReviewInput(draft_id=draft_id, brand_id=resolved_brand, content_text=text)
+        if answers or images or workspace_rules:
+            request: DraftPayload | ReviewInput = await self.payload_with_answers(
+                draft_id, resolved_brand, text, answers or {}, images
+            )
+            # The workspace's own rules come from the server, never from the client.
+            request.workspace_rules = [WorkspaceRule(type=r["type"], text=r["text"]) for r in (workspace_rules or [])]
+        else:
+            request = ReviewInput(draft_id=draft_id, brand_id=resolved_brand, content_text=text)
         memory = self.get_brand_memory(resolved_brand)
         log.info(
             "Reviewing draft '%s' for brand '%s' (policy_source=%s)",
@@ -121,6 +161,108 @@ class ReviewService:
         )
         # run_brand_review is synchronous (and may call an LLM), so keep it off the event loop.
         return await asyncio.to_thread(run_brand_review, request, self.repository, None, None, memory)
+
+    async def payload_with_answers(
+        self,
+        draft_id: str,
+        brand_id: str,
+        text: str,
+        answers: Dict[str, str],
+        images: Optional[list] = None,
+    ) -> DraftPayload:
+        """Turn the creator's answers to ENGANO's questions into review inputs.
+
+        Evidence answers become supplied evidence. A website answer is fetched here (safely)
+        and handed to the engine as context. A failed fetch is reported back as a question.
+        """
+        cleaned = {k[:100]: v.strip()[:2000] for k, v in answers.items() if isinstance(v, str) and v.strip()}
+        evidence = [v for k, v in cleaned.items() if k.startswith("evidence:")]
+        payload = DraftPayload(
+            draft_id=draft_id,
+            brand_id=brand_id,
+            channel=ChannelType.WEB_STUDIO,
+            content_text=text,
+            supplied_evidence=evidence or None,
+            answers=cleaned,
+            images=[
+                ImageItem(alt_text=(alt or "").strip() or None, metadata={"base64": data})
+                for data, alt in (images or [])
+            ],
+        )
+        if cleaned.get("website"):
+            try:
+                payload.website_url, payload.website_text = await fetch_site_text(cleaned["website"])
+            except SiteError as exc:
+                payload.website_error = str(exc)
+                log.info("Website answer for %s could not be read: %s", draft_id, exc)
+        return payload
+
+    async def check_website(
+        self, raw_url: str, draft_id: Optional[str] = None, brand_id: Optional[str] = None
+    ) -> "SiteCheck":
+        """Open a website, review what it says and shows, and suggest visual changes.
+
+        Raises SiteError (safe to show) when the site can't be opened.
+        """
+        from ai_engine.config import get_engine_config
+        from ai_engine.providers.factory import get_provider
+        from ai_engine.vision import imaging
+
+        resolved = self.resolve_brand_id(brand_id)
+        site: RenderedSite = await render_site(raw_url)
+        shots = [base64.b64encode(png).decode() for png in site.screenshots]
+        payload = DraftPayload(
+            draft_id=draft_id or f"site-{uuid.uuid4().hex[:12]}",
+            brand_id=resolved,
+            channel=ChannelType.WEB_STUDIO,
+            content_text=site.text[:10_000],
+            images=[
+                ImageItem(
+                    alt_text=f"Screenshot {i} of {site.final_url}",
+                    mime_type="image/png",
+                    # Screenshots get text and contrast checks. The AI looks at the page once, for design
+                    # suggestions, so describing each screenshot (and hunting for logos) would be a second, slower look.
+                    metadata={"base64": b, "skip_understanding": True},
+                )
+                for i, b in enumerate(shots, 1)
+            ],
+            # The site is already open, so don't ask the creator for its address again.
+            answers={"website": site.final_url},
+            website_url=site.final_url,
+            website_text=site.text,
+            metadata={"website_facts": site.facts, "site_url": site.final_url},
+        )
+        memory = self.get_brand_memory(resolved)
+
+        config = get_engine_config()
+
+        def design_opinion():
+            provider = get_provider(config=config)
+            first = imaging.decode_image(shots[0]).image
+            small, small_b64 = imaging.for_model(first)
+            try:
+                return provider.suggest_visual_changes(small_b64, small.width, small.height), None
+            except Exception as exc:
+                return None, str(exc)
+
+        review, (notes, notes_error) = await asyncio.gather(
+            asyncio.to_thread(run_brand_review, payload, self.repository, None, None, memory),
+            asyncio.to_thread(design_opinion),
+        )
+
+        thumb = imaging.decode_image(shots[0]).image
+        thumb.thumbnail((720, 720))
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=72)
+        return SiteCheck(
+            url=site.final_url,
+            title=site.title,
+            screenshot="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
+            facts={k: site.facts.get(k) for k in SITE_FACTS_SHOWN},
+            design_notes=notes or [],
+            design_error=notes_error,
+            result=review,
+        )
 
     async def review_payload(self, payload: DraftPayload) -> ReviewResult:
         """Execute review directly on a normalized DraftPayload."""

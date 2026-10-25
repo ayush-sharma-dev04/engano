@@ -1,0 +1,9 @@
+# Allow-list: only what the renderer image needs is sent to Docker. Keeps .env and
+# every other secret out of the build context.
+*
+!Backend/engano_backend/__init__.py
+!Backend/engano_backend/website.py
+!Backend/engano_backend/safe_proxy.py
+!Backend/engano_backend/site_render.py
+!Renderer/Dockerfile
+!Renderer/renderer_app.py

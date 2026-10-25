@@ -8,6 +8,16 @@ export type ReviewSubmission = {
   status: 'Pending Review' | 'Approved' | 'Changes Requested'
   submittedAt: string
   reviewerComment?: string
+  // Workspace flow: who wrote it, where it belongs, who cleared it.
+  workspaceId?: number | null
+  creatorId?: string
+  approvedBy?: 'AI' | 'Reviewer' | 'Brand Manager'
+  published?: boolean
+  aiStatus?: 'GREEN' | 'YELLOW' | 'RED'
+  at?: number
+  // Revision history: how many versions were sent, and how many comments there are.
+  version?: number
+  comments?: number
 }
 
 type ReviewQueueProps = {
@@ -67,7 +77,7 @@ function ReviewQueue({
           </p>
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-2">
+        <div className="rounded-lg glass px-4 py-2">
           <span className="text-sm text-slate-400">
             Pending
           </span>
@@ -216,7 +226,7 @@ function ReviewQueue({
               return (
                 <div
                   key={submission.id}
-                  className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"
+                  className="glass rounded-2xl p-5"
                 >
 
                   <div className="flex items-start justify-between gap-6">
@@ -243,7 +253,7 @@ function ReviewQueue({
                       {/* Summary */}
                       <div className="mt-5 flex flex-wrap gap-3">
 
-                        <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+                        <div className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3">
                           <p className="text-xs text-slate-500">
                             Findings
                           </p>
@@ -253,7 +263,7 @@ function ReviewQueue({
                           </p>
                         </div>
 
-                        <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+                        <div className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3">
                           <p className="text-xs text-slate-500">
                             Highest severity
                           </p>
@@ -287,7 +297,7 @@ function ReviewQueue({
                     {/* Open Review */}
                     <button
                       onClick={() => onOpenSubmission(submission)}
-                      className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                      className="shrink-0 btn-primary px-4 py-2.5 text-sm"
                     >
                       Open Review
                     </button>

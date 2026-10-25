@@ -1,0 +1,182 @@
+{
+ "duration": 204.9,
+ "chapters": [
+  {
+   "title": "Intro",
+   "start": 0.0
+  },
+  {
+   "title": "The problem",
+   "start": 11.46
+  },
+  {
+   "title": "Brand manager sets up",
+   "start": 24.72
+  },
+  {
+   "title": "Creator drafts",
+   "start": 51.8
+  },
+  {
+   "title": "Images",
+   "start": 89.68
+  },
+  {
+   "title": "Website check",
+   "start": 100.4
+  },
+  {
+   "title": "Reviewer decides",
+   "start": 123.31
+  },
+  {
+   "title": "Fix and resubmit",
+   "start": 154.35
+  },
+  {
+   "title": "Manager overview",
+   "start": 172.95
+  },
+  {
+   "title": "Where it stands",
+   "start": 187.87
+  }
+ ],
+ "captions": [
+  {
+   "start": 0.5,
+   "end": 10.4,
+   "text": "ENGANO checks content against a brand's own rules before anything is published. It explains every problem, cites where the rule came from, and leaves the decision to people."
+  },
+  {
+   "start": 12.0,
+   "end": 23.6,
+   "text": "Employees, agencies and AI tools publish fast. Wrong facts, retired offers, off-brand tone and unreadable visuals slip out before anyone notices. ENGANO is the check that happens first."
+  },
+  {
+   "start": 24.9,
+   "end": 30.1,
+   "text": "A brand manager signs up and creates a brand. Creators choose a brand to write for."
+  },
+  {
+   "start": 30.6,
+   "end": 33.2,
+   "text": "Each workspace gets its own join code."
+  },
+  {
+   "start": 33.6,
+   "end": 40.4,
+   "text": "And its own rules. Here the manager writes a don't: never use the word cheap. ENGANO enforces it exactly."
+  },
+  {
+   "start": 40.8,
+   "end": 46.8,
+   "text": "Reviewers can't sign themselves up. The manager creates their account, and ENGANO generates the password."
+  },
+  {
+   "start": 47.5,
+   "end": 50.8,
+   "text": "The manager can also post an assignment with a deadline."
+  },
+  {
+   "start": 52.0,
+   "end": 56.7,
+   "text": "A creator signs up, then joins the workspace with the code the manager shared."
+  },
+  {
+   "start": 57.2,
+   "end": 63.4,
+   "text": "The studio is where drafts are checked. This one has a banned word, a wrong fact and a retired offer."
+  },
+  {
+   "start": 63.6,
+   "end": 71.5,
+   "text": "Specialised agents run at once: terminology, claims, tone, legal and accessibility. Problems are underlined in place."
+  },
+  {
+   "start": 72.2,
+   "end": 78.2,
+   "text": "Every finding names the rule or approved fact behind it. The manager's own rule is enforced here too."
+  },
+  {
+   "start": 78.4,
+   "end": 83.3,
+   "text": "Fixes are suggestions the creator accepts. Nothing is changed behind their back."
+  },
+  {
+   "start": 83.6,
+   "end": 88.5,
+   "text": "Problems remain, so this draft can't clear itself. It goes to a human reviewer."
+  },
+  {
+   "start": 89.9,
+   "end": 99.2,
+   "text": "Images are checked too. ENGANO reads the text in the picture, measures real contrast from the pixels, and notices when there is no description for screen readers."
+  },
+  {
+   "start": 100.6,
+   "end": 114.4,
+   "text": "A creator can paste a website address. ENGANO opens it in a real browser, scrolls the whole page and back, tests the links, tries a phone-sized screen and measures accessibility. This takes about a minute, so we skip ahead."
+  },
+  {
+   "start": 114.4,
+   "end": 122.9,
+   "text": "Where ENGANO can't see the site, or something is broken, it says what is wrong and what the site's owner must fix. It doesn't just suggest small edits."
+  },
+  {
+   "start": 123.5,
+   "end": 129.0,
+   "text": "The reviewer signs in with the account the manager created, and sees only their workspace's queue."
+  },
+  {
+   "start": 129.3,
+   "end": 134.5,
+   "text": "Each draft arrives with ENGANO's findings, their sources and suggested corrections."
+  },
+  {
+   "start": 134.8,
+   "end": 142.8,
+   "text": "History keeps every version and shows what changed. Comments let the reviewer, the creator and the manager talk about the draft in one place."
+  },
+  {
+   "start": 143.0,
+   "end": 146.7,
+   "text": "They approve, or reject with a note the creator can act on."
+  },
+  {
+   "start": 146.9,
+   "end": 153.1,
+   "text": "A reviewer can add a WhatsApp number or Discord ID in settings, and review requests arrive there too."
+  },
+  {
+   "start": 154.6,
+   "end": 158.7,
+   "text": "The creator sees the reviewer's note, fixes the draft and resubmits."
+  },
+  {
+   "start": 159.3,
+   "end": 164.1,
+   "text": "This time nothing is left to fix. ENGANO clears it without bothering a reviewer."
+  },
+  {
+   "start": 164.4,
+   "end": 171.4,
+   "text": "Version one is never lost. Version two highlights exactly what changed, and the timeline shows who did what and when."
+  },
+  {
+   "start": 173.2,
+   "end": 183.1,
+   "text": "The manager never reviews drafts. They watch the whole picture: where content stands, who sends what, what reviewers decided, and which problems keep repeating."
+  },
+  {
+   "start": 183.6,
+   "end": 186.6,
+   "text": "And every approved draft is here, read only."
+  },
+  {
+   "start": 188.4,
+   "end": 203.8,
+   "text": "That is the working product: three roles, a multi-agent review engine, image and website checks, history and comments on every draft, and its data in Supabase. Still to build: a brand library, document import, and a policy for each brand."
+  }
+ ]
+}

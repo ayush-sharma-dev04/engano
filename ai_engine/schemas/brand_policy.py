@@ -64,6 +64,8 @@ class ToneRule(BaseModel):
     description: Optional[str] = None
     required_tones: List[str] = Field(default_factory=list)
     prohibited_tones: List[str] = Field(default_factory=list)
+    # Exact phrases that must not appear (matched case-insensitively on word boundaries).
+    prohibited_phrases: List[str] = Field(default_factory=list)
 
 
 class AccessibilityRules(BaseModel):
@@ -79,6 +81,23 @@ class LegalRule(BaseModel):
     requirement: str
     required_disclaimers: List[str] = Field(default_factory=list)
     restricted_claims: List[str] = Field(default_factory=list)
+    # Phrases that make `required_disclaimers` mandatory (e.g. "SLA", "uptime").
+    # When empty, the legacy absolute-SLA patterns are used.
+    trigger_phrases: List[str] = Field(default_factory=list)
+
+
+class LogoRules(BaseModel):
+    """What the brand expects to see (and not see) in images."""
+    require_brand_logo: bool = False
+    # Other companies whose logos may appear (partners, sponsors). Any other mark is flagged.
+    approved_partners: List[str] = Field(default_factory=list)
+
+
+class VisualStyle(BaseModel):
+    """The brand's look: fonts and colours a website or design should stay within."""
+    fonts: List[str] = Field(default_factory=list)
+    # Hex colours such as "#1E3CC8".
+    colors: List[str] = Field(default_factory=list)
 
 
 class BrandPolicy(BaseModel):
@@ -93,4 +112,6 @@ class BrandPolicy(BaseModel):
     tone_rules: List[ToneRule] = Field(default_factory=list)
     accessibility_rules: AccessibilityRules = Field(default_factory=AccessibilityRules)
     legal_rules: List[LegalRule] = Field(default_factory=list)
+    logo_rules: LogoRules = Field(default_factory=LogoRules)
+    visual_style: VisualStyle = Field(default_factory=VisualStyle)
     test_fixtures: Optional[Dict[str, Any]] = None

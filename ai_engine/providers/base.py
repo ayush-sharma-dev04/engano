@@ -4,11 +4,12 @@ Defines the contract for LLM-backed review providers (Gemini, Ollama, and RulesO
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from ai_engine.schemas.brand_policy import BrandPolicy
 from ai_engine.schemas.findings import Finding
 from ai_engine.schemas.payload import ImageItem
+from ai_engine.schemas.vision import ImageUnderstanding
 
 
 class ProviderResponse(BaseModel):
@@ -31,6 +32,7 @@ class BaseProvider(ABC):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Perform semantic review of draft content against authoritative policy.
 
@@ -52,5 +54,33 @@ class BaseProvider(ABC):
         (so RewriteAgent falls back to deterministic mechanical fixes).
         The base implementation is a no-op; rules-only and non-LLM providers need
         not override.
+        """
+        return None
+
+
+    def check_guidelines(self, content_text: str, rules: List[Tuple[str, str]]) -> Optional[dict]:
+        """Judge a draft against free-text workspace rules: {rule number: {verdict, quote, reason}}.
+
+        None means this provider cannot judge (e.g. rules-only); the rules then stay unchecked.
+        """
+        return None
+
+    def understand_image(
+        self,
+        image_b64: str,
+        alt_text: Optional[str],
+        width: int,
+        height: int,
+    ) -> Optional[ImageUnderstanding]:
+        """Look at one image (PNG, base64) and say what it shows.
+
+        None means this provider cannot look at images (e.g. rules-only).
+        """
+        return None
+
+    def suggest_visual_changes(self, image_b64: str, width: int, height: int) -> Optional[List[str]]:
+        """Look at a website screenshot and suggest visual design changes.
+
+        None means this provider cannot look at images (e.g. rules-only).
         """
         return None

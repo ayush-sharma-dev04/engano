@@ -29,7 +29,7 @@ function Approvals({ submissions }: ApprovalsProps) {
       {/* Summary */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Total Approved
@@ -42,7 +42,7 @@ function Approvals({ submissions }: ApprovalsProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             With Findings
@@ -59,7 +59,7 @@ function Approvals({ submissions }: ApprovalsProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
 
           <p className="text-sm text-slate-500">
             Clean Reviews
@@ -112,7 +112,7 @@ function Approvals({ submissions }: ApprovalsProps) {
 
             <div
               key={submission.id}
-              className="rounded-xl border border-slate-800 bg-slate-900/50 p-6"
+              className="glass rounded-2xl p-6"
             >
 
               {/* Header */}
@@ -157,7 +157,7 @@ function Approvals({ submissions }: ApprovalsProps) {
               {/* Findings Summary */}
               <div className="mt-5 flex flex-wrap gap-3">
 
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+                <div className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3">
 
                   <p className="text-xs text-slate-500">
                     Findings reviewed
@@ -170,7 +170,7 @@ function Approvals({ submissions }: ApprovalsProps) {
                 </div>
 
 
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+                <div className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3">
 
                   <p className="text-xs text-slate-500">
                     Decision
@@ -213,7 +213,7 @@ function Approvals({ submissions }: ApprovalsProps) {
 
                       <div
                         key={index}
-                        className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3"
+                        className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950/40 px-4 py-3"
                       >
 
                         <div

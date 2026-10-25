@@ -31,7 +31,7 @@ function History({ submissions }: HistoryProps) {
       {/* Summary */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
           <p className="text-sm text-slate-500">
             Total Decisions
           </p>
@@ -42,7 +42,7 @@ function History({ submissions }: HistoryProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
           <p className="text-sm text-slate-500">
             Approved
           </p>
@@ -57,7 +57,7 @@ function History({ submissions }: HistoryProps) {
         </div>
 
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="glass rounded-2xl p-5">
           <p className="text-sm text-slate-500">
             Changes Requested
           </p>
@@ -110,7 +110,7 @@ function History({ submissions }: HistoryProps) {
 
               <div
                 key={submission.id}
-                className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"
+                className="glass rounded-2xl p-5"
               >
 
                 <div className="flex items-start justify-between gap-6">

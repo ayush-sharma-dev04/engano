@@ -108,7 +108,10 @@ def test_reviews_text_and_replies(client, fake):
 
 
 def test_clean_draft_is_green_without_rewrite(client, fake):
-    signed_post(client, text_message("wamid.3", "Nimbus DB keeps your data safe with a 99.95% uptime SLA."))
+    signed_post(
+        client,
+        text_message("wamid.3", "Nimbus DB keeps your data safe with a 99.95% uptime SLA. Terms and conditions apply to service SLA."),
+    )
     text = fake.sent[0]["text"]
     assert "Ready to publish" in text
     assert "Suggested rewrite" not in text
@@ -128,8 +131,8 @@ def test_help_image_and_unsupported(client, fake):
     help_text, image_only, captioned, unsupported = (m["text"] for m in fake.sent)
     assert "ENGANO brand check" in help_text
     # Image-only drafts now go through the engine (alt text has no source on WhatsApp).
-    assert "Accessibility" in image_only and "alternative text" in image_only and "isn't analysed yet" in image_only
-    assert "Needs reviewer approval" in captioned and "isn't analysed yet" in captioned
+    assert "Accessibility" in image_only and "alternative text" in image_only and "couldn't open the image itself" in image_only
+    assert "Needs reviewer approval" in captioned and "couldn't open the image itself" in captioned
     assert "only check text" in unsupported
 
 

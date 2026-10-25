@@ -53,11 +53,24 @@ class VisualWCAGSpecialist(BaseSpecialist):
                             severity=FindingSeverity.MEDIUM,
                             highlighted_text=img_label,
                             text_span=TextSpan(start=0, end=0),
-                            explanation=f"Attached visual media '{img_label}' lacks descriptive alt text.",
+                            explanation=(
+                                f"Attached visual media '{img_label}' lacks descriptive alt text."
+                                + (
+                                    f" Suggested alt text: “{img.metadata['suggested_alt']}”."
+                                    if (img.metadata or {}).get("suggested_alt")
+                                    else ""
+                                )
+                            ),
                             evidence_status=EvidenceStatus.VERIFIED,
                             cited_source="WCAG 2.1 AA 1.1.1 Non-text Content",
-                            suggested_fix="Add descriptive alternative text for accessibility.",
+                            suggested_fix=(
+                                f"Add alt text, for example: “{img.metadata['suggested_alt']}”"
+                                if (img.metadata or {}).get("suggested_alt")
+                                else "Add descriptive alternative text for accessibility."
+                            ),
                             human_review_required=True,
+                            image_index=idx + 1,
+                            suggested_alt=(img.metadata or {}).get("suggested_alt"),
                         )
                     )
 
@@ -84,6 +97,7 @@ class VisualWCAGSpecialist(BaseSpecialist):
                             cited_source="WCAG 2.1 AA 1.4.3 Contrast",
                             suggested_fix=f"Increase text contrast to at least {threshold:.1f}:1.",
                             human_review_required=True,
+                            image_index=idx + 1,
                         )
                     )
 
@@ -101,6 +115,7 @@ class VisualWCAGSpecialist(BaseSpecialist):
                         cited_source="Brand Identity Guidelines: Logo Clear Space",
                         suggested_fix="Ensure minimum clear space is preserved around the logo.",
                         human_review_required=False,
+                        image_index=idx + 1,
                     )
                 )
 

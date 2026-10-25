@@ -45,7 +45,8 @@ class ClaimsSpecialist(BaseSpecialist):
         )
         for cf in claim_findings:
             # Ensure superlative without benchmark is strictly unsupported, not contradicted
-            if cf.category == FindingCategory.UNSUPPORTED_CLAIM:
+            # (A superlative that cites a permitted benchmark stays "provided, needs verification".)
+            if cf.category == FindingCategory.UNSUPPORTED_CLAIM and cf.evidence_status != EvidenceStatus.UNVERIFIED_PROVIDED:
                 cf = cf.model_copy(update={
                     "evidence_status": EvidenceStatus.UNSUPPORTED,
                     "human_review_required": True,

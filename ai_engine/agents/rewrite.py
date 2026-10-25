@@ -7,6 +7,7 @@ STRICT CONTRACT: A proposed rewrite never overrides or bypasses an underlying RE
 """
 
 import logging
+import re
 from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 from ai_engine.agents.specialists.legal_policy_specialist import LegalPolicySpecialist
@@ -222,12 +223,27 @@ class RewriteAgent:
             end = f.text_span.end
             fix = f.suggested_fix
 
-            # Only apply literal replacements when the slice matches exactly.
-            if current_text[start:end] != f.highlighted_text:
+            # Only apply literal replacements when the slice matches exactly
+            # (disclaimer appends below do not depend on the span).
+            is_append = f.category == FindingCategory.LEGAL and bool(fix) and fix.lower().startswith("append required disclaimer")
+            if not is_append and current_text[start:end] != f.highlighted_text:
                 continue
 
             # Guidance-only suggestions (e.g. "Rephrase in...") are not literal replacements.
             if fix and any(fix.lower().startswith(p) for p in _GUIDANCE_PREFIXES):
+                continue
+
+            # "Append required disclaimer: '<text>'" adds the disclaimer to the end of the copy.
+            if f.category == FindingCategory.LEGAL and fix and fix.lower().startswith("append required disclaimer"):
+                m = re.search(r"'(.+)'\s*$", fix)
+                if m and m.group(1).lower() not in current_text.lower():
+                    current_text = current_text.rstrip() + " " + m.group(1)
+                    applied_fixes.append(f"Appended required disclaimer ({f.cited_source})")
+                continue
+
+            # A retired offer's replacement is a noun phrase that rarely fits the sentence
+            # grammatically, so leave it for the reviewer instead of splicing it in.
+            if f.category == FindingCategory.OUTDATED_OFFER:
                 continue
 
             # An empty suggested_fix means "delete this span".

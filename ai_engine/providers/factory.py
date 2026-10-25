@@ -30,6 +30,7 @@ class RulesOnlyProvider(BaseProvider):
         policy: BrandPolicy,
         deterministic_findings: list[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Return empty semantic findings; deterministic rules handle evaluation."""
         return ProviderResponse(

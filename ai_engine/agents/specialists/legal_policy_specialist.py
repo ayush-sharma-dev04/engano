@@ -81,16 +81,23 @@ class LegalPolicySpecialist(BaseSpecialist):
                     r"\bunconditional\s+sla\b",
                     r"\bunlimited\s+sla\b",
                 ]
+                trigger_patterns = [
+                    rf"(?<!\w){re.escape(t)}(?!\w)" for t in rule.trigger_phrases if t.strip()
+                ]
                 has_unconditioned = any(
-                    re.search(pat, text, re.IGNORECASE) for pat in unconditioned_sla_patterns
+                    re.search(pat, text, re.IGNORECASE)
+                    for pat in (trigger_patterns or unconditioned_sla_patterns)
                 )
 
                 if has_unconditioned and disclaimer.lower() not in text.lower():
+                    # A plain SLA/uptime mention only needs the disclaimer appended (fixable);
+                    # absolute promises ("guaranteed SLA", "100% SLA") stay high severity.
+                    absolute = any(re.search(pat, text, re.IGNORECASE) for pat in unconditioned_sla_patterns)
                     findings.append(
                         Finding(
                             finding_id=f"legal_missing_disclaimer_{rule_id}",
                             category=FindingCategory.LEGAL,
-                            severity=FindingSeverity.HIGH,
+                            severity=FindingSeverity.HIGH if (absolute or not trigger_patterns) else FindingSeverity.MEDIUM,
                             highlighted_text=text[:min(len(text), 40)],
                             text_span=TextSpan(start=0, end=min(len(text), 40)),
                             explanation=(

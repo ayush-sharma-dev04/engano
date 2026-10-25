@@ -67,12 +67,13 @@ class GeminiProvider(BaseProvider):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Call Gemini to perform semantic review of the draft content."""
         start_time = time.perf_counter()
 
         # Build prompt payload
-        policy_summary = policy.model_dump_json(exclude_none=True)
+        policy_summary = policy.model_dump_json(exclude_none=True, exclude={"test_fixtures"})
         findings_summary = json.dumps([f.model_dump() for f in deterministic_findings])
 
         prompt = (
@@ -81,6 +82,13 @@ class GeminiProvider(BaseProvider):
             f"=== DETERMINISTIC FINDINGS DETECTED SO FAR ===\n{findings_summary}\n\n"
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
+
+        if context:
+            prompt += (
+                "\n=== RETRIEVED BRAND CONTEXT (advisory, cite by [source:id]; "
+                "the AUTHORITATIVE BRAND POLICY above always wins) ===\n"
+                + "\n".join(context) + "\n"
+            )
 
         if images:
             image_refs = [img.url for img in images if img.url]
@@ -249,3 +257,52 @@ class GeminiProvider(BaseProvider):
         if clean.endswith("```"):
             clean = clean[:-3].rstrip()
         return clean.strip() or None
+
+    def check_guidelines(self, content_text, rules):
+        from ai_engine.agents.specialists.guideline_specialist import guideline_prompt, parse_guideline_verdicts
+
+        try:
+            resp = self._client.models.generate_content(model=self.model, contents=guideline_prompt(content_text, rules))
+            return parse_guideline_verdicts(resp.text if hasattr(resp, "text") else str(resp))
+        except Exception as exc:
+            raise RuntimeError("the model could not check the workspace rules") from exc
+
+    def understand_image(self, image_b64, alt_text, width, height):
+        import base64
+
+        from google.genai import types
+
+        from ai_engine.vision.understand import build_prompt, parse_understanding
+
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type="image/png"),
+                    build_prompt(alt_text, width, height),
+                ],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+            )
+            return parse_understanding(resp.text or "")
+        except Exception:
+            raise RuntimeError("the vision model could not read this image") from None
+
+    def suggest_visual_changes(self, image_b64, width, height):
+        import base64
+
+        from google.genai import types
+
+        from ai_engine.vision.understand import build_design_prompt, parse_suggestions
+
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type="image/png"),
+                    build_design_prompt(width, height),
+                ],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+            )
+            return parse_suggestions(resp.text or "")
+        except Exception:
+            raise RuntimeError("the vision model could not review the design") from None

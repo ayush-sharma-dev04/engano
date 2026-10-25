@@ -39,5 +39,29 @@ class WhatsAppClient:
     async def mark_read(self, phone_number_id: str, message_id: str) -> None:
         await self._post(phone_number_id, {"status": "read", "message_id": message_id})
 
+    async def download_media(self, media_id: str, max_bytes: int = 4 * 1024 * 1024) -> bytes:
+        """Fetch an image the user sent. Two steps: ask Meta where it is, then download it."""
+        if not self._token:
+            raise RuntimeError("WHATSAPP_ACCESS_TOKEN is not set")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        info = await self._http.get(f"{self._base}/{media_id}", headers=headers)
+        if info.is_error:
+            raise RuntimeError(f"WhatsApp media lookup HTTP {info.status_code}")
+        meta = info.json()
+        url = str(meta.get("url") or "")
+        if not url.startswith("https://"):
+            raise RuntimeError("WhatsApp returned an unexpected media address")
+        if int(meta.get("file_size") or 0) > max_bytes:
+            raise RuntimeError("image is too large")
+        data = bytearray()
+        async with self._http.stream("GET", url, headers=headers) as resp:
+            if resp.is_error:
+                raise RuntimeError(f"WhatsApp media download HTTP {resp.status_code}")
+            async for chunk in resp.aiter_bytes():
+                data.extend(chunk)
+                if len(data) > max_bytes:
+                    raise RuntimeError("image is too large")
+        return bytes(data)
+
     async def aclose(self) -> None:
         await self._http.aclose()

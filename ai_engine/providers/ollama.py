@@ -55,6 +55,7 @@ class OllamaProvider(BaseProvider):
         policy: BrandPolicy,
         deterministic_findings: List[Finding],
         images: Optional[List[ImageItem]] = None,
+        context: Optional[List[str]] = None,
     ) -> ProviderResponse:
         """Execute semantic analysis via local Ollama endpoint.
 
@@ -63,7 +64,7 @@ class OllamaProvider(BaseProvider):
         """
         start_time = time.perf_counter()
 
-        policy_summary = policy.model_dump_json(exclude_none=True)
+        policy_summary = policy.model_dump_json(exclude_none=True, exclude={"test_fixtures"})
         findings_summary = json.dumps([f.model_dump() for f in deterministic_findings])
 
         prompt = (
@@ -72,6 +73,13 @@ class OllamaProvider(BaseProvider):
             f"=== DETERMINISTIC FINDINGS DETECTED SO FAR ===\n{findings_summary}\n\n"
             f"=== UNTRUSTED DRAFT CONTENT TO REVIEW ===\n{content_text}\n"
         )
+
+        if context:
+            prompt += (
+                "\n=== RETRIEVED BRAND CONTEXT (advisory, cite by [source:id]; "
+                "the AUTHORITATIVE BRAND POLICY above always wins) ===\n"
+                + "\n".join(context) + "\n"
+            )
 
         # Multimodal: forward image URLs or embedded base64 bytes for qwen2.5vl inspection
         image_refs: List[str] = []
@@ -225,6 +233,78 @@ class OllamaProvider(BaseProvider):
             return None
 
         return _clean_rewrite_output(raw_text)
+
+    def check_guidelines(self, content_text, rules):
+        """One rule per question: a small local model judges a single rule far better than a list."""
+        from ai_engine.agents.specialists.guideline_specialist import guideline_prompt, parse_guideline_verdicts
+
+        verdicts = {}
+        for number, rule in enumerate(rules, 1):
+            payload = {
+                "model": self.model,
+                "prompt": guideline_prompt(content_text, [rule]),
+                "format": "json",
+                "stream": False,
+                "keep_alive": "1h",
+                "options": {"temperature": 0.0},
+            }
+            try:
+                resp = self._client.post(f"{self.base_url}/api/generate", json=payload)
+                resp.raise_for_status()
+                answer = parse_guideline_verdicts(resp.json().get("response", "")).get(1)
+            except Exception as exc:
+                raise RuntimeError("the model could not check the workspace rules") from exc
+            if answer:
+                verdicts[number] = answer
+        return verdicts
+
+    def understand_image(self, image_b64, alt_text, width, height):
+        from ai_engine.vision.understand import build_prompt, parse_understanding
+
+        payload = {
+            "model": self.model,
+            "prompt": build_prompt(alt_text, width, height),
+            "images": [image_b64],
+            "format": "json",
+            "stream": False,
+            "keep_alive": "1h",
+            "options": {"temperature": 0.0},
+        }
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/generate", json=payload, timeout=self.config.vision_timeout_seconds
+            )
+        except httpx.TimeoutException:
+            raise RuntimeError("the vision model took too long") from None
+        except httpx.HTTPError:
+            raise RuntimeError("the vision model could not be reached") from None
+        if resp.status_code != 200:
+            raise RuntimeError(f"the vision model returned HTTP {resp.status_code}")
+        try:
+            return parse_understanding(resp.json().get("response", ""))
+        except Exception:
+            raise RuntimeError("the vision model gave an unreadable answer") from None
+
+    def suggest_visual_changes(self, image_b64, width, height):
+        from ai_engine.vision.understand import build_design_prompt, parse_suggestions
+
+        payload = {
+            "model": self.model,
+            "prompt": build_design_prompt(width, height),
+            "images": [image_b64],
+            "format": "json",
+            "stream": False,
+            "keep_alive": "1h",
+            "options": {"temperature": 0.0},
+        }
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/generate", json=payload, timeout=self.config.vision_timeout_seconds
+            )
+            resp.raise_for_status()
+            return parse_suggestions(resp.json().get("response", ""))
+        except Exception:
+            raise RuntimeError("the vision model could not review the design") from None
 
 
 def _clean_rewrite_output(raw_text: str) -> Optional[str]:

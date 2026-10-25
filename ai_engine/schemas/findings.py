@@ -17,6 +17,7 @@ class FindingCategory(str, Enum):
     TONE_MISMATCH = "tone_mismatch"
     VISUAL_WCAG = "visual_wcag"
     LEGAL = "legal"
+    BRAND_GUIDELINE = "brand_guideline"
 
 
 class FindingSeverity(str, Enum):
@@ -57,6 +58,8 @@ class Finding(BaseModel):
     cited_source: Optional[str] = Field(default=None, description="Authoritative source citation if applicable")
     suggested_fix: Optional[str] = Field(default=None, description="Proposed replacement or remediation text")
     human_review_required: bool = Field(default=False, description="Flag indicating reviewer approval is required")
+    image_index: Optional[int] = Field(default=None, description="1-based number of the attached image this is about")
+    suggested_alt: Optional[str] = Field(default=None, description="Suggested alt text for the image, if relevant")
 
     def validate_against_text(self, full_text: str) -> bool:
         """Validate that text_span matches highlighted_text in full_text."""

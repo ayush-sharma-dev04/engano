@@ -19,7 +19,19 @@ class ReviewActions(discord.ui.View):
         custom_id="engano:request_review",
     )
     async def request_review(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Review requests open once the web studio is live. Nothing was sent to a reviewer.",
+        bot = interaction.client
+        reviewer_id = getattr(getattr(bot, "escalation", None), "discord_user_id", None)
+        if not reviewer_id:
+            await interaction.response.send_message(
+                "No reviewer is configured (ENGANO_REVIEWER_DISCORD_ID). Nothing was sent.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        embeds = interaction.message.embeds[:1] if interaction.message else []
+        sent = await bot.send_to_reviewer(
+            f"ENGANO: <@{interaction.user.id}> asked you to review this draft check.", embeds[0] if embeds else None
+        )
+        await interaction.followup.send(
+            "Sent to the reviewer." if sent else "I couldn't reach the reviewer. Please contact them directly.",
             ephemeral=True,
         )

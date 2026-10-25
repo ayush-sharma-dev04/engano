@@ -75,10 +75,37 @@ class ToneSpecialist(BaseSpecialist):
                                 ),
                                 evidence_status=EvidenceStatus.VERIFIED,
                                 cited_source=rule_ref,
-                                suggested_fix="Rephrase in a clear, professional, and objective brand voice.",
+                                suggested_fix=(
+                                    "!" if set(matched) == {"!"}
+                                    else "Rephrase in a clear, professional, and objective brand voice."
+                                ),
                                 human_review_required=False,
                             )
                         )
+
+            # Brand-configured prohibited phrases (data-driven, no LLM needed)
+            for phrase in rule.prohibited_phrases:
+                if not phrase.strip():
+                    continue
+                for match in re.finditer(rf"(?<!\w){re.escape(phrase)}(?!\w)", text, re.IGNORECASE):
+                    start, end = match.span()
+                    findings.append(
+                        Finding(
+                            finding_id=f"tone_phrase_{rule_ref.replace(' ', '_').lower()}_{start}_{end}",
+                            category=FindingCategory.TONE_MISMATCH,
+                            severity=FindingSeverity.MEDIUM,
+                            highlighted_text=text[start:end],
+                            text_span=TextSpan(start=start, end=end),
+                            explanation=(
+                                f"'{text[start:end]}' is a prohibited phrase under {rule_ref} "
+                                f"({rule.description or 'brand tone rule'})."
+                            ),
+                            evidence_status=EvidenceStatus.VERIFIED,
+                            cited_source=rule_ref,
+                            suggested_fix="Rephrase in a clear, professional, and objective brand voice.",
+                            human_review_required=False,
+                        )
+                    )
 
             # Check direct phrase matches in prohibited_tones if specific phrases are provided
             for prob_tone in rule.prohibited_tones:

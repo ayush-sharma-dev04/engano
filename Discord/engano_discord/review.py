@@ -1,5 +1,6 @@
 """Discord draft model and rendering of review results as embeds."""
 
+import base64
 from dataclasses import dataclass, field
 
 import discord
@@ -30,6 +31,9 @@ class Draft:
     # Discord's per-attachment "description" is the image's alt text; None when not set.
     image_alt_texts: list[str | None] = field(default_factory=list)
     source_url: str | None = None
+    # The attachments themselves (read after the interaction is acknowledged) and their bytes.
+    image_attachments: list = field(default_factory=list)
+    image_data: list[bytes | None] = field(default_factory=list)
 
     @property
     def has_text(self) -> bool:
@@ -45,6 +49,10 @@ def to_payload(reviews: ReviewService, draft: Draft, draft_id: str) -> DraftPayl
     # The adapter only knows image URLs; add the alt text Discord gave us.
     for image, alt_text in zip(payload.images, draft.image_alt_texts):
         image.alt_text = alt_text or None
+    # Attach the pixels so ENGANO can read the text, measure contrast and spot logos.
+    for image, data in zip(payload.images, draft.image_data):
+        if data:
+            image.metadata["base64"] = base64.b64encode(data).decode()
     return payload
 
 
@@ -94,7 +102,11 @@ def render_result(draft: Draft, result: ReviewResult) -> discord.Embed:
     if draft.image_urls:
         embed.add_field(
             name="Images",
-            value="Alt text was checked. What's inside the image isn't analysed yet.",
+            value=(
+                "The text in the image, its contrast and any logos were checked."
+                if "ImageAnalyzer" in result.metadata.agents_executed
+                else "Only alt text was checked. I couldn't open the image itself."
+            ),
             inline=False,
         )
 

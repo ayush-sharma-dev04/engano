@@ -1,11 +1,19 @@
+import asyncio
 import logging
+import os
 import secrets
+import time
+import uuid
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator, model_validator
 from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
+from ai_engine.schemas.review import ReviewResult
 
 from engano_linkedin.client import LinkedInClient
 from engano_linkedin.config import LinkedInSettings
@@ -15,9 +23,99 @@ from engano_whatsapp.client import WhatsAppClient
 from engano_whatsapp.config import WhatsAppSettings
 from engano_whatsapp.router import build_router as build_whatsapp_router
 
+from .escalation import EscalationSettings
 from .review_service import ReviewService, ReviewSettings
+from .auth_mirror import AuthMirror
+from .notify import ReviewerNotifier
+from .team_api import build_router as build_team_router
+from .team_store import TeamStore, open_team_store
+from .website import SiteError
 
 log = logging.getLogger("engano.backend")
+
+MAX_REVIEW_CHARS = 10_000
+
+
+MAX_IMAGES = 4
+MAX_IMAGE_B64_CHARS = 5_600_000  # about 4 MB of image
+
+
+class ReviewImage(BaseModel):
+    """One attached image: base64 file data plus the alt text the author wrote."""
+
+    data: str = Field(min_length=8, max_length=MAX_IMAGE_B64_CHARS)
+    alt_text: str | None = Field(default=None, max_length=1000)
+
+
+class ReviewRequest(BaseModel):
+    """Body of POST /api/review. The brand is never taken from the client."""
+
+    text: str = Field(default="", max_length=MAX_REVIEW_CHARS)
+    draft_id: str | None = Field(default=None, max_length=100)
+    # Answers to ENGANO's earlier questions: question id -> answer.
+    answers: dict[str, str] = Field(default_factory=dict, max_length=12)
+    images: list[ReviewImage] = Field(default_factory=list, max_length=MAX_IMAGES)
+
+    @field_validator("answers")
+    @classmethod
+    def _limit_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(len(k) > 100 or len(v) > 2000 for k, v in value.items()):
+            raise ValueError("An answer is too long.")
+        return value
+
+    @model_validator(mode="after")
+    def _needs_something_to_review(self) -> "ReviewRequest":
+        if not self.text.strip() and not self.images:
+            raise ValueError("Add some text or an image to review.")
+        return self
+
+
+class SiteRequest(BaseModel):
+    url: str = Field(min_length=3, max_length=2048)
+
+
+class SiteCheckResponse(BaseModel):
+    url: str
+    title: str
+    screenshot: str
+    facts: dict
+    design_notes: list[str]
+    design_error: str | None
+    result: ReviewResult
+
+
+class _Limiter:
+    """At most `limit` calls per `window` seconds for each key (in memory, per process)."""
+
+    def __init__(self) -> None:
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, key: str, limit: int, window: float = 600.0) -> bool:
+        now = time.monotonic()
+        recent = [t for t in self._hits.get(key, []) if now - t < window]
+        if len(recent) >= limit:
+            self._hits[key] = recent
+            return False
+        recent.append(now)
+        self._hits[key] = recent
+        return True
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("ENGANO_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+# On the open internet the studio's heavy endpoints need a signed-in person. Set ENGANO_REQUIRE_LOGIN=0 only for local experiments.
+def _login_required() -> bool:
+    return os.getenv("ENGANO_REQUIRE_LOGIN", "1").strip().lower() not in ("0", "false", "no")
 
 
 def create_app(
@@ -28,7 +126,14 @@ def create_app(
     linkedin_client: LinkedInClient | None = None,
     linkedin_store: TokenStore | None = None,
     engine_config: EngineConfig | None = None,
+    escalation: EscalationSettings | None = None,
+    team_store: TeamStore | None = None,
+    auth_mirror: AuthMirror | None = None,
+    notifier: ReviewerNotifier | None = None,
 ) -> FastAPI:
+    escalation = escalation or EscalationSettings.from_env()
+    # Supabase when a database URL is configured; otherwise a local SQLite file (ENGANO_DB_PATH or Backend/.data).
+    team_store = team_store or open_team_store(Path(__file__).resolve().parent.parent / ".data" / "engano.db")
     review_service = review_service or ReviewService(ReviewSettings.from_env())
 
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()
@@ -52,6 +157,15 @@ def create_app(
         await linkedin_client.aclose()
 
     app = FastAPI(title="ENGANO API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        # e.g. https://[a-z0-9-]+\\.netlify\\.app to allow a hosted site and its deploy previews
+        allow_origin_regex=os.getenv("ENGANO_CORS_ORIGIN_REGEX") or None,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["X-Review-Receipt"],
+    )
 
     async def require_brand_memory_key(
         x_engano_memory_key: str | None = Header(default=None),
@@ -75,6 +189,61 @@ def create_app(
             "whatsapp_configured": not whatsapp_settings.missing(),
             "linkedin_connected": bool(linkedin_token and not linkedin_token.expired),
         }
+
+    limiter = _Limiter()
+
+    def signed_in(authorization: str | None, doing: str, limit_env: str, default_limit: int, kind: str) -> dict | None:
+        """The signed-in person, or a 401 when login is required. Each person gets a fair share of the heavy work."""
+        token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
+        me = team_store.account_for(token)
+        if not me:
+            if _login_required():
+                raise HTTPException(status_code=401, detail=f"Sign in to {doing}.")
+            return None
+        if not limiter.allow(f"{kind}:{me['id']}", _int_env(limit_env, default_limit)):
+            raise HTTPException(status_code=429, detail="That's a lot in a short time. Wait a few minutes and try again.")
+        return me
+
+    @app.post("/api/review", response_model=ReviewResult)
+    async def review(request: ReviewRequest, response: Response, authorization: str | None = Header(default=None)):
+        """Run the full multi-agent review on a draft for the configured brand."""
+        # A creator signed in to a workspace is also checked against that workspace's own DO/DON'T rules.
+        me = signed_in(authorization, "run reviews", "ENGANO_REVIEW_LIMIT", 40, "review")
+        _, rules, scope = team_store.review_scope(me["id"]) if me else (None, [], "")
+        try:
+            result = await review_service.review_text(
+                request.draft_id or f"studio-{uuid.uuid4().hex[:12]}",
+                request.text,
+                answers=request.answers or None,
+                images=[(i.data, i.alt_text) for i in request.images] or None,
+                workspace_rules=rules or None,
+            )
+        except Exception:
+            log.exception("Review failed")
+            raise HTTPException(status_code=503, detail="Review is unavailable. Try again shortly.")
+        # A signed note that ENGANO reviewed exactly this text and found nothing to fix. A creator's
+        # submission is only cleared without a human if it carries a valid one.
+        clean = (
+            result.decision.status.value == "GREEN"
+            and not result.questions
+            and all(f.severity.value == "low" for f in result.findings)
+            and not request.images
+        )
+        response.headers["X-Review-Receipt"] = team_store.make_receipt(request.text, clean, scope)
+        return result
+
+    @app.post("/api/check-website", response_model=SiteCheckResponse)
+    async def check_website(request: SiteRequest, authorization: str | None = Header(default=None)):
+        """Open a public website in a browser; review its text and look; suggest visual changes."""
+        signed_in(authorization, "check websites", "ENGANO_SITE_LIMIT", 8, "site")
+        try:
+            check = await review_service.check_website(request.url)
+        except SiteError as exc:
+            raise HTTPException(status_code=422, detail=f"Couldn't check that website: {exc}.")
+        except Exception:
+            log.exception("Website check failed")
+            raise HTTPException(status_code=503, detail="Website checks are unavailable. Try again shortly.")
+        return check
 
     # Brand Memory API Endpoints
     @app.get("/api/brand-memory", dependencies=[Depends(require_brand_memory_key)])
@@ -135,8 +304,13 @@ def create_app(
             log.exception("Failed to persist brand memory")
             raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
+    app.include_router(build_team_router(
+            team_store,
+            auth_mirror or AuthMirror.from_env(),
+            notifier or ReviewerNotifier.from_env(whatsapp_client, whatsapp_settings.graph_version),
+        ))
     app.include_router(
-        build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client),
+        build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client, escalation),
         prefix="/api/webhooks/whatsapp",
     )
     app.include_router(build_linkedin_router(review_service, linkedin_settings, linkedin_client, linkedin_store))

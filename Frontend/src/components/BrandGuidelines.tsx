@@ -62,7 +62,7 @@ function BrandGuidelines({
       </div>
 
       {/* Add Guideline */}
-      <div className="mb-8 rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+      <div className="mb-8 glass rounded-2xl p-6">
 
         <h2 className="text-lg font-semibold">
           Add a Guideline
@@ -81,7 +81,7 @@ function BrandGuidelines({
                 event.target.value as 'DO' | "DON'T"
               )
             }
-            className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-emerald-500"
+            className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400"
           >
             <option value="DO">DO</option>
             <option value="DON'T">DON'T</option>
@@ -97,12 +97,12 @@ function BrandGuidelines({
               }
             }}
             placeholder="e.g. Never use the word cheap."
-            className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-emerald-500"
+            className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-400"
           />
 
           <button
             onClick={addGuideline}
-            className="rounded-lg bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+            className="btn-primary px-5 py-3 text-sm"
           >
             Add Guideline
           </button>
@@ -115,7 +115,7 @@ function BrandGuidelines({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 
         {/* DO */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+        <div className="glass rounded-2xl p-6">
 
           <div className="mb-5 flex items-center justify-between">
 
@@ -147,7 +147,7 @@ function BrandGuidelines({
 
               <div
                 key={guideline.id}
-                className="flex items-start justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4"
+                className="flex items-start justify-between gap-4 rounded-lg border border-white/10 bg-slate-950/60 p-4"
               >
 
                 <div className="flex gap-3">
@@ -178,7 +178,7 @@ function BrandGuidelines({
         </div>
 
         {/* DON'T */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+        <div className="glass rounded-2xl p-6">
 
           <div className="mb-5 flex items-center justify-between">
 
@@ -210,7 +210,7 @@ function BrandGuidelines({
 
               <div
                 key={guideline.id}
-                className="flex items-start justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4"
+                className="flex items-start justify-between gap-4 rounded-lg border border-white/10 bg-slate-950/60 p-4"
               >
 
                 <div className="flex gap-3">
@@ -243,7 +243,7 @@ function BrandGuidelines({
       </div>
 
       {/* Brand Library Notice */}
-      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/30 p-5">
+      <div className="mt-6 glass rounded-2xl p-5">
 
         <div className="flex gap-3">
 
