@@ -28,7 +28,10 @@ def test_rules_only_execution_no_network(nimbus_policy: BrandPolicy):
     assert resp.findings == []
 
 
-def test_gemini_missing_api_key_raises_clean_error():
+def test_gemini_missing_api_key_raises_clean_error(monkeypatch):
+    # The provider falls back to the ambient GEMINI_API_KEY env var; unset it
+    # so the test is deterministic in any developer environment.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     config = EngineConfig(AI_PROVIDER="gemini", GEMINI_API_KEY="")
     with pytest.raises(ValueError) as exc:
         GeminiProvider(config=config, client=None)

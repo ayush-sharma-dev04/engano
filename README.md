@@ -79,7 +79,9 @@ async def review_draft_endpoint(payload: ReviewInput):
     # Execute the review engine
     review_result = await run_brand_review(payload)
     
-    # Save review_result to Supabase table 'draft_reviews'
+    # Persist review_result to the Supabase table 'reviews'
+    # (created by supabase/migrations/20261024_000002_create_reviews.sql,
+    # service_role only; there is no 'draft_reviews' table)
     # Return JSON response directly to frontend
     return review_result
 ```

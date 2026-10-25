@@ -90,7 +90,7 @@ function App() {
   // ==========================================
 
   const [workspaceName, setWorkspaceName] = useState('')
-  const [workspaceCode, setWorkspaceCode] = useState('')
+  const [, setWorkspaceCode] = useState('')
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null)

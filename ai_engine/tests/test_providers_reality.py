@@ -49,8 +49,11 @@ def test_rules_only_execution_independent_of_cloud_and_local(nimbus_policy: Bran
     assert resp.latency_ms == 0.0
 
 
-def test_gemini_missing_credentials_raises_error():
+def test_gemini_missing_credentials_raises_error(monkeypatch):
     """GeminiProvider refuses to initialize without an API key."""
+    # The provider falls back to the ambient GEMINI_API_KEY env var; unset it
+    # so the test is deterministic in any developer environment.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     cfg = EngineConfig(AI_PROVIDER="gemini", GEMINI_API_KEY="")
     with pytest.raises(ValueError) as exc:
         GeminiProvider(config=cfg, client=None)
