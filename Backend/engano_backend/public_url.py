@@ -11,11 +11,12 @@ import argparse
 import os
 import re
 import sys
+import tempfile
 import time
 
 import httpx
 
-from .env import load_env
+from .env import ROOT_ENV, load_env
 
 
 def tunnel_address(metrics: str) -> str | None:
@@ -31,6 +32,34 @@ def answers(address: str) -> bool:
         return httpx.get(f"{address}/api/health", timeout=6).status_code == 200
     except httpx.HTTPError:
         return False
+
+
+def remember(address: str, env_file=ROOT_ENV) -> bool:
+    """Write the address into .env as ENGANO_PUBLIC_URL (replacing the old one). True if the file changed.
+
+    Only this one line is touched; the rest of the file, and its permissions, stay as they were.
+    """
+    try:
+        text = env_file.read_text()
+    except OSError:
+        return False
+    line = f"ENGANO_PUBLIC_URL={address}"
+    if re.search(r"^ENGANO_PUBLIC_URL=.*$", text, re.M):
+        new = re.sub(r"^ENGANO_PUBLIC_URL=.*$", lambda _: line, text, count=1, flags=re.M)
+    else:
+        new = text.rstrip("\n") + "\n\n# The backend's public address, written by `make start`; `make deploy` bakes it into the web app.\n" + line + "\n"
+    if new == text:
+        return False
+    fd, tmp = tempfile.mkstemp(dir=env_file.parent, prefix=".env.")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(new)
+        os.chmod(tmp, env_file.stat().st_mode & 0o777)
+        os.replace(tmp, env_file)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    return True
 
 
 def main() -> int:
@@ -53,7 +82,8 @@ def main() -> int:
         return 1
 
     site = (os.getenv("ENGANO_STUDIO_URL") or "https://YOUR-SITE.netlify.app").rstrip("/")
-    print(f"[api-url] Backend is public at  {address}")
+    changed = remember(address)
+    print(f"[api-url] Backend is public at  {address}" + ("  (saved to .env as ENGANO_PUBLIC_URL)" if changed else ""))
     print(f"[api-url] Share this link:       {site}/?api={address}")
     print("[api-url] or on the site's sign-in page: Server > Change > paste the address above.")
     origins = [o.strip().rstrip("/") for o in os.getenv("ENGANO_CORS_ORIGINS", "").split(",") if o.strip()]
@@ -62,6 +92,12 @@ def main() -> int:
         print(f"[api-url] Reminder: {site} is not allowed to call this backend yet. Add it to ENGANO_CORS_ORIGINS in .env and restart.")
     elif "YOUR-SITE" in site and not origins and not pattern:
         print("[api-url] Reminder: no hosted site is allowed yet. Set ENGANO_CORS_ORIGINS (or ENGANO_CORS_ORIGIN_REGEX) in .env and restart.")
+    if changed and os.getenv("ENGANO_AUTO_DEPLOY", "").strip().lower() in ("1", "true", "yes"):
+        # The address is new, so the published site is out of date: publish it again.
+        from .deploy_site import main as deploy
+
+        print("[api-url] ENGANO_AUTO_DEPLOY is on: publishing the web app with the new address")
+        return deploy()
     return 0
 
 

@@ -19,9 +19,10 @@ from .public_url import answers, tunnel_address
 FRONTEND = REPO_ROOT / "Frontend"
 
 
-def choose_api_url(configured: str | None, tunnel: str | None) -> str | None:
-    """The address to bake in: what .env says, else the running tunnel. https only (a hosted page can't call http)."""
-    for candidate in ((configured or "").strip().rstrip("/"), tunnel or ""):
+def choose_api_url(configured: str | None, tunnel: str | None, remembered: str | None = None) -> str | None:
+    """The address to bake in, first that applies: VITE_API_URL in .env, the running tunnel, the last one `make start`
+    saved (ENGANO_PUBLIC_URL). https only (a hosted page can't call http)."""
+    for candidate in ((configured or "").strip().rstrip("/"), tunnel or "", (remembered or "").strip().rstrip("/")):
         if candidate.startswith("https://"):
             return candidate
     return None
@@ -36,7 +37,7 @@ def main() -> int:
 
     configured = os.getenv("VITE_API_URL")
     tunnel = tunnel_address(os.getenv("TUNNEL_METRICS", "127.0.0.1:20249")) if not (configured or "").strip() else None
-    api = choose_api_url(configured, tunnel)
+    api = choose_api_url(configured, tunnel, os.getenv("ENGANO_PUBLIC_URL"))
     if not api:
         print("[deploy] No https backend address. Set VITE_API_URL in .env, or start the tunnel first (`make start`).")
         return 1
