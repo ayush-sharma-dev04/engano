@@ -15,14 +15,6 @@ from ai_engine.config import EngineConfig, get_engine_config
 from ai_engine.schemas.brand_memory import BrandMemory
 from ai_engine.schemas.review import ReviewResult
 
-from .web_contract import (
-    CreatorImproveRequest,
-    WebReviewRequest,
-    creator_improve_response,
-    new_draft_id,
-    web_review_response,
-)
-
 from engano_linkedin.client import LinkedInClient
 from engano_linkedin.config import LinkedInSettings
 from engano_linkedin.router import build_router as build_linkedin_router
@@ -312,56 +304,11 @@ def create_app(
             log.exception("Failed to persist brand memory")
             raise HTTPException(status_code=503, detail="Brand memory storage unavailable.")
 
-    # Web Studio API contract endpoints.
-    # The brand policy is always resolved server-side; request-supplied
-    # "guidelines" are accepted for compatibility but never enforced.
-    @app.post("/review")
-    async def review_draft(request: WebReviewRequest):
-        draft_id = (request.draft_id or "").strip() or new_draft_id()
-        try:
-            result = await review_service.review_text(
-                draft_id, request.content, request.brand_id
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except (OSError, PermissionError, RuntimeError):
-            log.exception("Review request failed")
-            raise HTTPException(status_code=503, detail="Review service unavailable.")
-        if result.completion_status != "completed":
-            log.warning("Review for draft '%s': %s", draft_id, result.completion_status)
-            if "incomplete_policy" in result.completion_status:
-                raise HTTPException(
-                    status_code=404,
-                    detail=(
-                        "No active brand policy for brand "
-                        f"'{result.brand_id}'."
-                    ),
-                )
-            raise HTTPException(status_code=503, detail="Review could not be completed.")
-        return web_review_response(result)
-
-    @app.post("/creator/improve")
-    async def creator_improve(request: CreatorImproveRequest):
-        try:
-            result = await review_service.review_text(new_draft_id(), request.content, None)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except (OSError, PermissionError, RuntimeError):
-            log.exception("Creator improve request failed")
-            raise HTTPException(status_code=503, detail="Review service unavailable.")
-        if result.completion_status != "completed":
-            log.warning("Improve request: %s", result.completion_status)
-            if "incomplete_policy" in result.completion_status:
-                raise HTTPException(
-                    status_code=404,
-                    detail=(
-                        "No active brand policy for brand "
-                        f"'{result.brand_id}'."
-                    ),
-                )
-            raise HTTPException(status_code=503, detail="Review could not be completed.")
-        return creator_improve_response(result, request)
-
+    app.include_router(build_team_router(
+            team_store,
+            auth_mirror or AuthMirror.from_env(),
+            notifier or ReviewerNotifier.from_env(whatsapp_client, whatsapp_settings.graph_version),
+        ))
     app.include_router(
         build_whatsapp_router(review_service, whatsapp_settings, whatsapp_client, escalation),
         prefix="/api/webhooks/whatsapp",
