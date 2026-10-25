@@ -85,3 +85,23 @@ def test_the_review_receipt_header_is_readable_by_the_hosted_site(tmp_path, monk
     kate = signed_up(c, "Kate")
     r = c.post("/api/review", json={"text": "Hello there."}, headers={**kate, "Origin": SITE})
     assert "x-review-receipt" in r.headers.get("access-control-expose-headers", "").lower()
+
+
+def test_deploy_uses_the_address_from_env_else_the_tunnel_and_only_https():
+    from engano_backend.deploy_site import choose_api_url
+
+    assert choose_api_url("https://api.example/", "https://t.trycloudflare.com") == "https://api.example"
+    assert choose_api_url("", "https://t.trycloudflare.com") == "https://t.trycloudflare.com"
+    assert choose_api_url(None, None) is None
+    assert choose_api_url("http://api.example", None) is None  # a hosted https page cannot call plain http
+    assert choose_api_url("http://localhost:8000", "https://t.trycloudflare.com") == "https://t.trycloudflare.com"
+
+
+def test_deploy_refuses_to_run_without_netlify_settings(monkeypatch, capsys):
+    from engano_backend import deploy_site
+
+    monkeypatch.setattr(deploy_site, "load_env", lambda: None)
+    monkeypatch.delenv("NETLIFY_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("NETLIFY_SITE_ID", raising=False)
+    assert deploy_site.main() == 1
+    assert "NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID" in capsys.readouterr().out

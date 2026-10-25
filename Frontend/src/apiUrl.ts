@@ -2,7 +2,8 @@
 // someone's computer behind a tunnel whose address changes, so the address can be set in the browser.
 const KEY = 'engano_api_url'
 
-const BUILT_IN = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000').replace(/\/+$/, '')
+// VITE_API_URL comes from .env (or Netlify's settings); an empty value means "not set".
+const BUILT_IN = ((import.meta.env.VITE_API_URL as string | undefined)?.trim() || 'http://localhost:8000').replace(/\/+$/, '')
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 

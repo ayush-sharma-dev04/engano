@@ -13,7 +13,7 @@ OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen
 OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: api-url help pull setup renderer renderer-up migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
+.PHONY: deploy api-url help pull setup renderer renderer-up migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -102,6 +102,9 @@ linkedin: ## Connect a LinkedIn account (opens the sign-in page; backend must be
 
 tunnel: ## Public HTTPS URL for the backend (then `make webhook`; `make start` does both)
 	cloudflared tunnel --no-autoupdate --loglevel warn --metrics $(TUNNEL_METRICS) --url http://localhost:$(PORT)
+
+deploy: ## Build the web app with the backend address from .env (VITE_API_URL, else the running tunnel) and publish it to Netlify
+	$(PY) -m engano_backend.deploy_site
 
 api-url: ## Show the backend's public address and the link that points the hosted site at it
 	$(PY) -m engano_backend.public_url --metrics $(TUNNEL_METRICS)

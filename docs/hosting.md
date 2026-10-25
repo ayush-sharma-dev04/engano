@@ -42,20 +42,33 @@ Reviews and website checks require a signed-in person (`ENGANO_REQUIRE_LOGIN=1`,
    Leave Netlify's own build settings empty. No environment variables are needed.
 3. Deploy.
 
-## 3. Pointing the site at the backend
+## 3. Telling the site where the backend is (in `.env`)
 
-A quick tunnel gets a **new address every time it starts**, so the site does not have it built in:
+Put it in the repo's `.env`, the same file as everything else:
 
-* Open the link `make api-url` printed (`https://your-site.netlify.app/?api=https://xxxx.trycloudflare.com`). The sign-in page asks
-  you to confirm the server (a link can only suggest one: it never switches on its own) and remembers it in that browser.
-* Or, on the sign-in page, under the form: **Server > Change**, paste the address, **Use this server**. The dot shows green when it
-  answers.
-* Anyone you invite does the same once, with the link. When you restart the tunnel, send the new link.
+```
+VITE_API_URL=https://xxxx-xxxx.trycloudflare.com   # or leave empty to use the running tunnel
+NETLIFY_AUTH_TOKEN=...                             # Netlify > User settings > Applications > new personal access token
+NETLIFY_SITE_ID=...                                # Netlify > your site > Site configuration > Site ID
+```
+
+Then `make deploy` builds the web app with that address baked in and publishes it to your Netlify site (no Git push needed, no link
+to open, nobody enters anything). If `VITE_API_URL` is empty, it uses the address of the tunnel that is running right now, so the
+routine is: `make start`, then `make deploy`. A quick tunnel gets a **new address on every start**, so run `make deploy` again after
+restarting it, or use a fixed tunnel (below) and set `VITE_API_URL` once.
+
+Only variables starting with `VITE_` ever reach the website; the rest of `.env` (database URL, keys) stays on your computer.
+
+Prefer the Netlify dashboard? Add `VITE_API_URL` under Site configuration > Environment variables and trigger a deploy (Netlify cannot
+read your local `.env`, so the value has to be entered there too).
+
+Fallback, if the site was published with a different address: the sign-in page has **Server > Change**, and a link with `?api=https://...`
+suggests an address (the person must confirm it). `make api-url` prints that link.
 
 ## Want one fixed address instead?
 
-Use a tunnel with a stable hostname, then set `VITE_API_URL=https://that-address` in Netlify (Site configuration > Environment
-variables) and redeploy; nobody has to enter anything. Options: a named Cloudflare tunnel on a domain you own, an ngrok free static
+Use a tunnel with a stable hostname, set `VITE_API_URL=https://that-address` in `.env` once and run `make deploy` once (or set it in Netlify
+and redeploy); after that nothing changes when you restart. Options: a named Cloudflare tunnel on a domain you own, an ngrok free static
 domain, or Tailscale Funnel. Point it at `http://localhost:8000`. WhatsApp's webhook can use the same address.
 
 ## Good to know
