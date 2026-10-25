@@ -15,6 +15,9 @@ export type ReviewSubmission = {
   published?: boolean
   aiStatus?: 'GREEN' | 'YELLOW' | 'RED'
   at?: number
+  // Revision history: how many versions were sent, and how many comments there are.
+  version?: number
+  comments?: number
 }
 
 type ReviewQueueProps = {

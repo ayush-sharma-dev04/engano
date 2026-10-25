@@ -135,3 +135,40 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     </div>
   )
 }
+
+/**
+ * The loading animation: the platypus on a loop. Shows a still picture for people who asked their
+ * system for less motion, or if the video can't play. `label` is read out to screen readers.
+ */
+export function Loader({ label = 'Loading…', size = 170, showLabel = true }: { label?: string; size?: number; showLabel?: boolean }) {
+  const [failed, setFailed] = useState(false)
+  const [calm] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const height = Math.round((size * 300) / 290)
+  return (
+    <div role="status" aria-live="polite" className="flex flex-col items-center gap-3">
+      {calm || failed ? (
+        <img src="/perry-loader-still.png" width={size} height={height} alt="" aria-hidden="true" />
+      ) : (
+        <video
+          src="/perry-loader.webm"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          width={size}
+          height={height}
+          onError={() => setFailed(true)}
+          // `loop` does it; this is the belt to its braces, so it never stops on a frame.
+          onEnded={(e) => {
+            e.currentTarget.currentTime = 0
+            void e.currentTarget.play()
+          }}
+          disablePictureInPicture
+          aria-hidden="true"
+        />
+      )}
+      {showLabel ? <p className="text-sm text-slate-400">{label}</p> : <span className="sr-only">{label}</span>}
+    </div>
+  )
+}

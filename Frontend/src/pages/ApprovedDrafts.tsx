@@ -4,10 +4,10 @@ import type { ReviewSubmission, Workspace } from '../model'
 import { Empty, PageHeader, Pill } from '../ui'
 import { FIELD } from '../styles'
 
-type Props = { workspaces: Workspace[]; submissions: ReviewSubmission[] }
+type Props = { workspaces: Workspace[]; submissions: ReviewSubmission[]; onOpen: (submission: ReviewSubmission) => void }
 
 /** Brand Manager: every draft that was approved (by ENGANO or a reviewer), read-only. */
-export default function ApprovedDrafts({ workspaces, submissions }: Props) {
+export default function ApprovedDrafts({ workspaces, submissions, onOpen }: Props) {
   const nameOf = useNameOf()
   const [scope, setScope] = useState<number | 'all'>('all')
   const [by, setBy] = useState<'all' | 'AI' | 'Reviewer'>('all')
@@ -69,6 +69,11 @@ export default function ApprovedDrafts({ workspaces, submissions }: Props) {
                 </div>
               </div>
               <p className="mt-5 whitespace-pre-wrap rounded-xl bg-black/30 p-5 text-sm leading-7 text-slate-300">{s.content}</p>
+              <div className="mt-4">
+                <button onClick={() => onOpen(s)} className="btn-ghost px-4 py-2 text-sm text-violet-200">
+                  History &amp; comments ({s.version ?? 1} version{(s.version ?? 1) === 1 ? '' : 's'}, {s.comments ?? 0} comment{(s.comments ?? 0) === 1 ? '' : 's'})
+                </button>
+              </div>
             </article>
           ))}
         </div>

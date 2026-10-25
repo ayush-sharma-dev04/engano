@@ -8,10 +8,11 @@ type Filter = (typeof FILTERS)[number]
 type Props = {
   submissions: ReviewSubmission[]
   onEdit: (submission: ReviewSubmission) => void
+  onOpen: (submission: ReviewSubmission) => void
 }
 
 /** Joined creator: what was approved, what needs changes, and what is still waiting. */
-export default function MySubmissions({ submissions, onEdit }: Props) {
+export default function MySubmissions({ submissions, onEdit, onOpen }: Props) {
   const [filter, setFilter] = useState<Filter>('All')
 
   const shown = submissions.filter(
@@ -61,6 +62,11 @@ export default function MySubmissions({ submissions, onEdit }: Props) {
                 </div>
               </div>
               <p className="mt-5 whitespace-pre-wrap rounded-xl bg-black/30 p-5 text-sm leading-7 text-slate-300">{s.content}</p>
+              <div className="mt-4">
+                <button onClick={() => onOpen(s)} className="btn-ghost px-4 py-2 text-sm text-violet-200">
+                  History &amp; comments ({s.version ?? 1} version{(s.version ?? 1) === 1 ? '' : 's'}, {s.comments ?? 0} comment{(s.comments ?? 0) === 1 ? '' : 's'})
+                </button>
+              </div>
               {s.status === 'Changes Requested' && (
                 <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/5 p-5">
                   <p className="text-xs font-semibold uppercase tracking-wider text-red-300">Reviewer feedback</p>

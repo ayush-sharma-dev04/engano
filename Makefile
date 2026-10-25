@@ -52,6 +52,9 @@ migrate-status: setup ## Show which migrations are applied and which are pending
 seed: setup ## Load brand rules from data/brand_library/*.json into the database (APPLY=1 to write; default is a dry run)
 	$(PY) supabase/seed.py $(if $(APPLY),--apply)
 
+move-data: setup ## Copy accounts, workspaces and drafts from the local SQLite file into Supabase (run `make migrate` first)
+	$(PY) -m engano_backend.move_to_supabase
+
 sync-auth: setup ## List every ENGANO account under Supabase Authentication → Users (needs SUPABASE_SECRET_KEY in .env)
 	$(PY) -m engano_backend.sync_auth
 

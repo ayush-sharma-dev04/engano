@@ -1,0 +1,105 @@
+{
+ "duration": 102.4,
+ "chapters": [
+  {
+   "title": "Intro",
+   "start": 0.0
+  },
+  {
+   "title": "Manager assigns the work",
+   "start": 10.88
+  },
+  {
+   "title": "Developer checks the page",
+   "start": 29.44
+  },
+  {
+   "title": "Fix and check again",
+   "start": 60.22
+  },
+  {
+   "title": "Reviewer verifies",
+   "start": 76.93
+  },
+  {
+   "title": "Developer sees it approved",
+   "start": 92.29
+  },
+  {
+   "title": "Manager's view",
+   "start": 95.73
+  }
+ ],
+ "captions": [
+  {
+   "start": 0.5,
+   "end": 9.8,
+   "text": "Not every deliverable is text. Here a brand manager assigns work on a website to a developer, and ENGANO helps check the result before a reviewer signs it off."
+  },
+  {
+   "start": 11.1,
+   "end": 15.4,
+   "text": "The brand manager signs up and creates a workspace for the web team."
+  },
+  {
+   "start": 15.8,
+   "end": 20.4,
+   "text": "The manager creates the reviewer's account. ENGANO generates the password."
+  },
+  {
+   "start": 20.8,
+   "end": 28.3,
+   "text": "Then posts the assignment: fix the accessibility problems on the landing page, with the page address in the details and a deadline."
+  },
+  {
+   "start": 29.7,
+   "end": 33.0,
+   "text": "The developer signs up and joins with the workspace code."
+  },
+  {
+   "start": 33.4,
+   "end": 39.4,
+   "text": "The assignment is waiting, with its details and deadline. Starting it opens the studio with the title filled in."
+  },
+  {
+   "start": 39.8,
+   "end": 52.6,
+   "text": "The developer pastes the page address. ENGANO opens it in a real browser, scrolls the whole page, tests the links, tries a phone-sized screen and measures accessibility. This takes a while, so we skip ahead."
+  },
+  {
+   "start": 52.7,
+   "end": 59.8,
+   "text": "The result is specific. Every problem says what is wrong and what must be fixed, and the page can't pass until it is."
+  },
+  {
+   "start": 60.5,
+   "end": 66.4,
+   "text": "The developer fixes the page and checks it again. Here a well-built public site stands in for the fixed page."
+  },
+  {
+   "start": 71.1,
+   "end": 75.8,
+   "text": "Now only a minor note remains, so the developer sends the check to the reviewer."
+  },
+  {
+   "start": 77.1,
+   "end": 82.6,
+   "text": "The reviewer sees the task and the page that was checked, with ENGANO's findings and their sources."
+  },
+  {
+   "start": 83.0,
+   "end": 91.1,
+   "text": "They look at the history, add a comment, and approve. If something were wrong they would reject with a note, and the developer would fix and resubmit."
+  },
+  {
+   "start": 92.5,
+   "end": 94.6,
+   "text": "The developer sees the work approved."
+  },
+  {
+   "start": 95.9,
+   "end": 101.3,
+   "text": "The manager finds it in approved drafts, with its full history, without having reviewed anything."
+  }
+ ]
+}

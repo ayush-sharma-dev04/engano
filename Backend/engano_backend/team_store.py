@@ -1,15 +1,23 @@
-"""Accounts, workspaces and the review pipeline, stored in one SQLite file.
+"""Accounts, workspaces and the review pipeline.
 
 This is the shared state behind the web studio: who can sign in, which workspaces exist, what
-creators submitted and what reviewers decided. It uses only the standard library so it runs
-anywhere the backend does. Every public method is a short transaction; callers pass the id of
-the person acting and the store refuses anything that person may not do (it raises `Refused`
-with a message that is safe to show).
+creators submitted, what reviewers decided, every version of every draft, and the comments on it.
+
+Two backends share one code path:
+* `TeamStore`    - one SQLite file (tests, and the local fallback).
+* `PgTeamStore`  - Supabase Postgres, reached over the database URL (see supabase/migrations).
+
+Every public method is a short transaction; callers pass the id of the person acting and the
+store refuses anything that person may not do (it raises `Refused` with a message that is safe
+to show). The Supabase database is far from most laptops (about 0.4 s a round trip), so reads
+that nothing has changed are served from memory and the whole "what can this person see" view is
+one call to a database function.
 """
 
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -22,83 +30,62 @@ PURPOSES = ("Content Creator", "Business", "Reviewer")
 SESSION_SECONDS = 14 * 24 * 3600
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+SNAPSHOT_TTL = 15.0  # seconds a cached view may be reused when nothing here has changed
 
-SCHEMA = """
+SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS accounts (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  purpose TEXT NOT NULL,
-  brand TEXT COLLATE NOCASE,
-  salt TEXT NOT NULL,
-  hash TEXT NOT NULL,
-  created_by TEXT,
-  created_at REAL NOT NULL
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, purpose TEXT NOT NULL, brand TEXT,
+  salt TEXT NOT NULL, hash TEXT NOT NULL, created_by TEXT, created_at REAL NOT NULL,
+  whatsapp TEXT, discord_id TEXT, supabase_id TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS accounts_brand ON accounts(brand) WHERE brand IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_email ON accounts (lower(email));
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_brand ON accounts (lower(brand)) WHERE brand IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY,
-  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  expires_at REAL NOT NULL
+  token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, expires_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS workspaces (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  code TEXT NOT NULL UNIQUE,
-  created_by TEXT NOT NULL REFERENCES accounts(id),
-  created_at REAL NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, code TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL REFERENCES accounts(id), created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS members (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('Creator', 'Reviewer')),
+  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK (role IN ('Creator', 'Reviewer')),
   UNIQUE (workspace_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  UNIQUE (user_id)
+  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, UNIQUE (user_id)
 );
 CREATE TABLE IF NOT EXISTS assignments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL,
-  due_date TEXT NOT NULL,
-  created_at REAL NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  title TEXT NOT NULL, description TEXT NOT NULL, due_date TEXT NOT NULL, created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS guidelines (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('DO', 'DON''T')),
-  text TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('DO', 'DON''T')), text TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS submissions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  creator_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  findings TEXT NOT NULL,
-  status TEXT NOT NULL,
-  approved_by TEXT,
-  reviewer_comment TEXT,
-  ai_status TEXT,
-  created_at REAL NOT NULL,
-  updated_at REAL NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT NOT NULL,
+  findings TEXT NOT NULL, status TEXT NOT NULL, approved_by TEXT, reviewer_comment TEXT, ai_status TEXT,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reviewer_actions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
-  workspace_id INTEGER NOT NULL,
-  reviewer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  action TEXT NOT NULL,
-  created_at REAL NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  workspace_id INTEGER NOT NULL, reviewer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  title TEXT NOT NULL, action TEXT NOT NULL, created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS submission_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, findings TEXT NOT NULL, ai_status TEXT,
+  author_id TEXT NOT NULL, created_at REAL NOT NULL, UNIQUE (submission_id, version)
+);
+CREATE TABLE IF NOT EXISTS submission_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, actor_id TEXT, version INTEGER NOT NULL, body TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS submission_events_submission ON submission_events (submission_id, id);
 """
 
 
@@ -123,44 +110,104 @@ def _ms(seconds: float) -> int:
     return int(seconds * 1000)
 
 
+def _day(seconds: float) -> str:
+    return time.strftime("%d/%m/%Y", time.localtime(seconds))
+
+
+def _dict_row(cursor: sqlite3.Cursor, row: tuple) -> dict:
+    return {d[0]: row[i] for i, d in enumerate(cursor.description)}
+
+
+class _Conn:
+    """One connection, whichever database it is: `?` placeholders, rows as dicts, ids from INSERT."""
+
+    def __init__(self, raw: Any, pg: bool):
+        self.raw, self.pg, self.wrote = raw, pg, False
+
+    def _sql(self, sql: str) -> str:
+        return sql.replace("?", "%s") if self.pg else sql
+
+    def execute(self, sql: str, params: tuple | list = ()):
+        if sql.lstrip()[:6].upper() in ("INSERT", "UPDATE", "DELETE"):
+            self.wrote = True
+        return self.raw.execute(self._sql(sql), params)
+
+    def executemany(self, sql: str, rows: list) -> None:
+        if rows:
+            self.wrote = True
+            if self.pg:
+                with self.raw.cursor() as cur:
+                    cur.executemany(self._sql(sql), rows)
+            else:
+                self.raw.executemany(sql, rows)
+
+    def insert(self, sql: str, params: tuple | list = ()) -> int:
+        self.wrote = True
+        return int(self.raw.execute(self._sql(sql) + " RETURNING id", params).fetchone()["id"])
+
+
 class TeamStore:
+    """SQLite-backed store. `PgTeamStore` below swaps only how connections are made."""
+
+    pg = False
+
     def __init__(self, path: str | Path):
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self._memory = sqlite3.connect(":memory:", check_same_thread=False) if self.path == ":memory:" else None
+        self._memory = self._open_sqlite(":memory:") if self.path == ":memory:" else None
+        self._version = 0
+        self._snap_cache: dict[str, tuple[int, float, dict]] = {}
+        self._acct_cache: dict[str, tuple[int, float, dict]] = {}
+        self._scope_cache: dict[str, tuple[int, tuple]] = {}
+        self._detail_cache: dict[tuple[str, int], tuple[int, dict]] = {}
+        self._setup()
+
+    # -------------------------------------------------------------- connections
+
+    @staticmethod
+    def _open_sqlite(path: str) -> sqlite3.Connection:
+        raw = sqlite3.connect(path, timeout=15, check_same_thread=False)
+        raw.row_factory = _dict_row
+        raw.execute("PRAGMA foreign_keys = ON")
+        return raw
+
+    def _setup(self) -> None:
         with self._tx() as db:
-            db.executescript(SCHEMA)
-            cols = {row[1] for row in db.execute("PRAGMA table_info(accounts)")}
-            for extra in ("whatsapp", "discord_id"):
+            for statement in [s for s in SQLITE_SCHEMA.split(";\n") if s.strip()]:
+                db.raw.execute(statement)
+            cols = {row["name"] for row in db.raw.execute("PRAGMA table_info(accounts)")}
+            for extra in ("whatsapp", "discord_id", "supabase_id"):
                 if extra not in cols:
-                    db.execute(f"ALTER TABLE accounts ADD COLUMN {extra} TEXT")
-            if "supabase_id" not in cols:
-                db.execute("ALTER TABLE accounts ADD COLUMN supabase_id TEXT")
-            if not db.execute("SELECT 1 FROM meta WHERE key='receipt_secret'").fetchone():
-                db.execute("INSERT INTO meta VALUES ('receipt_secret', ?)", (secrets.token_hex(32),))
+                    db.raw.execute(f"ALTER TABLE accounts ADD COLUMN {extra} TEXT")
+        self._finish_setup()
+
+    def _finish_setup(self) -> None:
+        with self._tx() as db:
+            db.execute("INSERT INTO meta (key, value) VALUES ('receipt_secret', ?) ON CONFLICT (key) DO NOTHING", (secrets.token_hex(32),))
+            self._backfill_history(db)
+            self._receipt_key = db.execute("SELECT value FROM meta WHERE key = 'receipt_secret'").fetchone()["value"].encode()
 
     @contextmanager
-    def _tx(self) -> Iterator[sqlite3.Connection]:
-        db = self._memory or sqlite3.connect(self.path, timeout=15)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys = ON")
+    def _tx(self) -> Iterator[_Conn]:
+        raw = self._memory or self._open_sqlite(self.path)
         if not self._memory:
-            db.execute("PRAGMA journal_mode = WAL")
+            raw.execute("PRAGMA journal_mode = WAL")
+        db = _Conn(raw, False)
         try:
             yield db
-            db.commit()
+            raw.commit()
         except BaseException:
-            db.rollback()
+            raw.rollback()
             raise
+        else:
+            if db.wrote:
+                self._version += 1
         finally:
             if not self._memory:
-                db.close()
+                raw.close()
 
     # ------------------------------------------------------------ review receipts
-
-    def _secret(self, db: sqlite3.Connection) -> bytes:
-        return db.execute("SELECT value FROM meta WHERE key='receipt_secret'").fetchone()[0].encode()
 
     def review_scope(self, account_id: str) -> tuple[int | None, list[dict], str]:
         """The workspace a creator writes for, its DO/DON'T rules, and a fingerprint of both.
@@ -168,24 +215,30 @@ class TeamStore:
         A review receipt is tied to this fingerprint, so a review done without the workspace's rules
         (or before they changed) can never clear a draft.
         """
+        hit = self._scope_cache.get(account_id)
+        if hit and hit[0] == self._version:
+            return hit[1]
         with self._tx() as db:
             if self._purpose(db, account_id) != "Content Creator":
-                return None, [], ""
-            member = self._membership(db, account_id)
-            if not member:
-                return None, [], ""
-            rules = [
-                {"type": g["kind"], "text": g["text"]}
-                for g in db.execute("SELECT kind, text FROM guidelines WHERE workspace_id = ? ORDER BY id", (member["workspace_id"],))
-            ]
-            digest = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
-            return int(member["workspace_id"]), rules, f"{member['workspace_id']}:{digest}"
+                result: tuple = (None, [], "")
+            else:
+                member = self._membership(db, account_id)
+                if not member:
+                    result = (None, [], "")
+                else:
+                    rules = [
+                        {"type": g["kind"], "text": g["text"]}
+                        for g in db.execute("SELECT kind, text FROM guidelines WHERE workspace_id = ? ORDER BY id", (member["workspace_id"],)).fetchall()
+                    ]
+                    digest = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+                    result = (int(member["workspace_id"]), rules, f"{member['workspace_id']}:{digest}")
+        self._scope_cache[account_id] = (self._version, result)
+        return result
 
     def make_receipt(self, text: str, clean: bool, scope: str = "") -> str:
         """Proof that ENGANO reviewed exactly this text (with these workspace rules) and found it clean or not."""
-        with self._tx() as db:
-            body = f"{hashlib.sha256(text.strip().encode()).hexdigest()}|{'clean' if clean else 'flagged'}|{scope}"
-            return hmac.new(self._secret(db), body.encode(), hashlib.sha256).hexdigest() + ("c" if clean else "f")
+        body = f"{hashlib.sha256(text.strip().encode()).hexdigest()}|{'clean' if clean else 'flagged'}|{scope}"
+        return hmac.new(self._receipt_key, body.encode(), hashlib.sha256).hexdigest() + ("c" if clean else "f")
 
     def receipt_is_clean(self, text: str, receipt: str | None, scope: str = "") -> bool:
         if not receipt or receipt[-1:] != "c":
@@ -195,7 +248,7 @@ class TeamStore:
     # ------------------------------------------------------------------- accounts
 
     def _new_account(
-        self, db: sqlite3.Connection, name: str, email: str, password: str, purpose: str, brand: str | None, created_by: str | None
+        self, db: _Conn, name: str, email: str, password: str, purpose: str, brand: str | None, created_by: str | None
     ) -> str:
         name, email = name.strip(), email.strip()
         if not 2 <= len(name) <= 60:
@@ -210,11 +263,11 @@ class TeamStore:
             brand = (brand or "").strip()
             if not 2 <= len(brand) <= 60:
                 raise Refused("Give your brand a name of 2 to 60 characters.")
-            if db.execute("SELECT 1 FROM accounts WHERE brand = ?", (brand,)).fetchone():
+            if db.execute("SELECT 1 FROM accounts WHERE lower(brand) = lower(?)", (brand,)).fetchone():
                 raise Refused("A brand with that name already exists. Use a more specific name.")
         else:
             brand = None
-        if db.execute("SELECT 1 FROM accounts WHERE email = ?", (email,)).fetchone():
+        if db.execute("SELECT 1 FROM accounts WHERE lower(email) = lower(?)", (email,)).fetchone():
             raise Refused("An account with that email already exists. Sign in instead.", 409)
         account_id = f"u_{secrets.token_hex(6)}"
         salt = secrets.token_hex(16)
@@ -224,11 +277,11 @@ class TeamStore:
         )
         return account_id
 
-    def _session(self, db: sqlite3.Connection, account_id: str) -> str:
+    def _session(self, db: _Conn, account_id: str) -> str:
         token = secrets.token_urlsafe(32)
         now = time.time()
         db.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
-        db.execute("INSERT INTO sessions VALUES (?,?,?)", (_token_hash(token), account_id, now + SESSION_SECONDS))
+        db.execute("INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?,?,?)", (_token_hash(token), account_id, now + SESSION_SECONDS))
         return token
 
     def sign_up(self, name: str, email: str, password: str, purpose: str, brand: str | None) -> tuple[str, dict]:
@@ -240,7 +293,7 @@ class TeamStore:
 
     def sign_in(self, email: str, password: str) -> tuple[str, dict]:
         with self._tx() as db:
-            row = db.execute("SELECT * FROM accounts WHERE email = ?", (email.strip(),)).fetchone()
+            row = db.execute("SELECT * FROM accounts WHERE lower(email) = lower(?)", (email.strip(),)).fetchone()
             # Same work and same message whether or not the email exists.
             salt = row["salt"] if row else "00" * 16
             ok = hmac.compare_digest(_hash(password, salt), row["hash"] if row else "0" * 64)
@@ -255,12 +308,21 @@ class TeamStore:
     def account_for(self, token: str | None) -> dict | None:
         if not token:
             return None
+        key = _token_hash(token)
+        hit = self._acct_cache.get(key)
+        if hit and hit[0] == self._version and hit[1] > time.time():
+            return hit[2]
         with self._tx() as db:
             row = db.execute(
-                "SELECT a.id FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires_at > ?",
-                (_token_hash(token), time.time()),
+                "SELECT a.id, a.name, a.email, a.purpose, a.brand, a.whatsapp, a.discord_id, s.expires_at "
+                "FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires_at > ?",
+                (key, time.time()),
             ).fetchone()
-            return self._me(db, row["id"]) if row else None
+        if not row:
+            return None
+        me = self._me_from(row)
+        self._acct_cache[key] = (self._version, min(row["expires_at"], time.time() + 60), me)
+        return me
 
     def accounts_to_mirror(self) -> list[dict]:
         with self._tx() as db:
@@ -271,12 +333,16 @@ class TeamStore:
         with self._tx() as db:
             db.execute("UPDATE accounts SET supabase_id = ? WHERE id = ?", (supabase_id, account_id))
 
-    def _me(self, db: sqlite3.Connection, account_id: str) -> dict:
+    @staticmethod
+    def _me_from(r: dict) -> dict:
+        return {
+            "id": r["id"], "name": r["name"], "email": r["email"], "purpose": r["purpose"], "brand": r["brand"],
+            "whatsapp": r["whatsapp"] or "", "discordId": r["discord_id"] or "",
+        }
+
+    def _me(self, db: _Conn, account_id: str) -> dict:
         r = db.execute("SELECT id, name, email, purpose, brand, whatsapp, discord_id FROM accounts WHERE id = ?", (account_id,)).fetchone()
-        me = {k: r[k] for k in ("id", "name", "email", "purpose", "brand")}
-        me["whatsapp"] = r["whatsapp"] or ""
-        me["discordId"] = r["discord_id"] or ""
-        return me
+        return self._me_from(r)
 
     def set_contact(self, account_id: str, whatsapp: str | None, discord_id: str | None) -> dict:
         """Save where this person wants to be messaged. Both are optional; blank clears one."""
@@ -314,22 +380,22 @@ class TeamStore:
     # ----------------------------------------------------------------- guards
 
     @staticmethod
-    def _owned(db: sqlite3.Connection, workspace_id: int, manager_id: str) -> sqlite3.Row:
+    def _owned(db: _Conn, workspace_id: int, manager_id: str) -> dict:
         row = db.execute("SELECT * FROM workspaces WHERE id = ? AND created_by = ?", (workspace_id, manager_id)).fetchone()
         if not row:
             raise Refused("That workspace was not found.", 404)
         return row
 
     @staticmethod
-    def _purpose(db: sqlite3.Connection, account_id: str) -> str:
+    def _purpose(db: _Conn, account_id: str) -> str:
         return db.execute("SELECT purpose FROM accounts WHERE id = ?", (account_id,)).fetchone()["purpose"]
 
-    def _need(self, db: sqlite3.Connection, account_id: str, purpose: str, doing: str) -> None:
+    def _need(self, db: _Conn, account_id: str, purpose: str, doing: str) -> None:
         if self._purpose(db, account_id) != purpose:
             raise Refused(f"Only a {'Brand Manager' if purpose == 'Business' else purpose.lower()} can {doing}.", 403)
 
     @staticmethod
-    def _membership(db: sqlite3.Connection, user_id: str) -> sqlite3.Row | None:
+    def _membership(db: _Conn, user_id: str) -> dict | None:
         return db.execute(
             "SELECT m.*, w.name AS workspace_name FROM members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? ORDER BY m.id LIMIT 1",
             (user_id,),
@@ -347,10 +413,7 @@ class TeamStore:
                 code = "ENG-" + "".join(secrets.choice(CODE_CHARS) for _ in range(6))
                 if not db.execute("SELECT 1 FROM workspaces WHERE code = ?", (code,)).fetchone():
                     break
-            cur = db.execute(
-                "INSERT INTO workspaces (name, code, created_by, created_at) VALUES (?,?,?,?)", (name, code, manager_id, time.time())
-            )
-            return int(cur.lastrowid)
+            return db.insert("INSERT INTO workspaces (name, code, created_by, created_at) VALUES (?,?,?,?)", (name, code, manager_id, time.time()))
 
     def delete_workspace(self, manager_id: str, workspace_id: int) -> None:
         with self._tx() as db:
@@ -367,7 +430,7 @@ class TeamStore:
             if current and current["workspace_id"] != ws["id"]:
                 raise Refused(f"You are already in {current['workspace_name']}. Leave it first to join another workspace.", 409)
             db.execute("DELETE FROM requests WHERE user_id = ?", (user_id,))
-            db.execute("INSERT OR IGNORE INTO members (workspace_id, user_id, role) VALUES (?,?, 'Creator')", (ws["id"], user_id))
+            db.execute("INSERT INTO members (workspace_id, user_id, role) VALUES (?,?, 'Creator') ON CONFLICT DO NOTHING", (ws["id"], user_id))
 
     def request_join(self, user_id: str, workspace_id: int) -> None:
         with self._tx() as db:
@@ -426,7 +489,7 @@ class TeamStore:
             ).fetchone()
             if not ok:
                 raise Refused("That reviewer was not found.", 404)
-            db.execute("INSERT OR IGNORE INTO members (workspace_id, user_id, role) VALUES (?,?, 'Reviewer')", (workspace_id, reviewer_id))
+            db.execute("INSERT INTO members (workspace_id, user_id, role) VALUES (?,?, 'Reviewer') ON CONFLICT DO NOTHING", (workspace_id, reviewer_id))
 
     # ------------------------------------------------------ assignments, guidelines
 
@@ -484,7 +547,37 @@ class TeamStore:
             db.execute("DELETE FROM guidelines WHERE workspace_id = ?", (workspace_id,))
             db.executemany("INSERT INTO guidelines (workspace_id, kind, text) VALUES (?,?,?)", [(workspace_id, k, t) for k, t in clean])
 
-    # ------------------------------------------------------------ submissions
+    # ----------------------------------------------- submissions, history, comments
+
+    @staticmethod
+    def _event(db: _Conn, submission_id: int, kind: str, actor_id: str | None, version: int, body: str = "") -> None:
+        db.execute(
+            "INSERT INTO submission_events (submission_id, kind, actor_id, version, body, created_at) VALUES (?,?,?,?,?,?)",
+            (submission_id, kind, actor_id, version, body, time.time()),
+        )
+
+    def _backfill_history(self, db: _Conn) -> None:
+        """Give drafts that predate revision history a first version and a timeline."""
+        db.execute(
+            "INSERT INTO submission_versions (submission_id, version, title, content, findings, ai_status, author_id, created_at) "
+            "SELECT s.id, 1, s.title, s.content, s.findings, s.ai_status, s.creator_id, s.created_at FROM submissions s "
+            "WHERE NOT EXISTS (SELECT 1 FROM submission_versions v WHERE v.submission_id = s.id)"
+        )
+        db.execute(
+            "INSERT INTO submission_events (submission_id, kind, actor_id, version, body, created_at) "
+            "SELECT s.id, 'submitted', s.creator_id, 1, '', s.created_at FROM submissions s "
+            "WHERE NOT EXISTS (SELECT 1 FROM submission_events e WHERE e.submission_id = s.id)"
+        )
+        db.execute(
+            "INSERT INTO submission_events (submission_id, kind, actor_id, version, body, created_at) "
+            "SELECT s.id, CASE WHEN s.approved_by = 'AI' THEN 'cleared' ELSE 'approved' END, NULL, 1, '', s.updated_at FROM submissions s "
+            "WHERE s.status = 'Approved' AND NOT EXISTS (SELECT 1 FROM submission_events e WHERE e.submission_id = s.id AND e.kind IN ('approved', 'cleared'))"
+        )
+        db.execute(
+            "INSERT INTO submission_events (submission_id, kind, actor_id, version, body, created_at) "
+            "SELECT s.id, 'rejected', NULL, 1, COALESCE(s.reviewer_comment, ''), s.updated_at FROM submissions s "
+            "WHERE s.status = 'Changes Requested' AND NOT EXISTS (SELECT 1 FROM submission_events e WHERE e.submission_id = s.id AND e.kind = 'rejected')"
+        )
 
     def submit(
         self, creator_id: str, title: str, content: str, findings: list, ai_status: str | None, receipt: str | None, editing_id: int | None
@@ -500,14 +593,10 @@ class TeamStore:
             member = self._membership(db, creator_id)
             if not member:
                 raise Refused("Join a workspace before submitting.", 403)
-            fields = (
-                (title.strip() or "Untitled Draft")[:120],
-                content,
-                json.dumps(findings),
-                "Approved" if cleared else "Pending Review",
-                "AI" if cleared else None,
-                ai_status if ai_status in ("GREEN", "YELLOW", "RED") else None,
-            )
+            clean_title = (title.strip() or "Untitled Draft")[:120]
+            findings_json = json.dumps(findings)
+            status = "Approved" if cleared else "Pending Review"
+            ai = ai_status if ai_status in ("GREEN", "YELLOW", "RED") else None
             now = time.time()
             if editing_id is not None:
                 row = db.execute("SELECT * FROM submissions WHERE id = ? AND creator_id = ?", (editing_id, creator_id)).fetchone()
@@ -515,16 +604,29 @@ class TeamStore:
                     raise Refused("That draft can no longer be edited.", 409)
                 db.execute(
                     "UPDATE submissions SET title=?, content=?, findings=?, status=?, approved_by=?, ai_status=?, reviewer_comment=NULL, workspace_id=?, updated_at=? WHERE id=?",
-                    (*fields, member["workspace_id"], now, editing_id),
+                    (clean_title, content, findings_json, status, "AI" if cleared else None, ai, member["workspace_id"], now, editing_id),
                 )
                 sid = editing_id
+                version = self._latest_version(db, sid) + 1
+                kind = "resubmitted"
             else:
-                cur = db.execute(
+                sid = db.insert(
                     "INSERT INTO submissions (title, content, findings, status, approved_by, ai_status, workspace_id, creator_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (*fields, member["workspace_id"], creator_id, now, now),
+                    (clean_title, content, findings_json, status, "AI" if cleared else None, ai, member["workspace_id"], creator_id, now, now),
                 )
-                sid = int(cur.lastrowid)
-            return self._submission(db, sid)
+                version, kind = 1, "submitted"
+            db.execute(
+                "INSERT INTO submission_versions (submission_id, version, title, content, findings, ai_status, author_id, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (sid, version, clean_title, content, findings_json, ai, creator_id, now),
+            )
+            self._event(db, sid, kind, creator_id, version)
+            if cleared:
+                self._event(db, sid, "cleared", None, version)
+            return self._sub_dict(db.execute(self._SUB_SQL + " WHERE s.id = ?", (sid,)).fetchone())
+
+    @staticmethod
+    def _latest_version(db: _Conn, submission_id: int) -> int:
+        return int(db.execute("SELECT COALESCE(MAX(version), 0) AS v FROM submission_versions WHERE submission_id = ?", (submission_id,)).fetchone()["v"])
 
     def decide(self, reviewer_id: str, submission_id: int, approve: bool, comment: str = "") -> None:
         if not approve and not comment.strip():
@@ -539,42 +641,118 @@ class TeamStore:
                 raise Refused("That draft was not found.", 404)
             if sub["status"] != "Pending Review":
                 raise Refused("That draft has already been decided.", 409)
+            now = time.time()
             if approve:
-                db.execute("UPDATE submissions SET status='Approved', approved_by='Reviewer', reviewer_comment=NULL, updated_at=? WHERE id=?", (time.time(), submission_id))
+                db.execute("UPDATE submissions SET status='Approved', approved_by='Reviewer', reviewer_comment=NULL, updated_at=? WHERE id=?", (now, submission_id))
             else:
                 db.execute(
                     "UPDATE submissions SET status='Changes Requested', approved_by=NULL, reviewer_comment=?, updated_at=? WHERE id=?",
-                    (comment.strip()[:2000], time.time(), submission_id),
+                    (comment.strip()[:2000], now, submission_id),
                 )
             db.execute(
                 "INSERT INTO reviewer_actions (submission_id, workspace_id, reviewer_id, title, action, created_at) VALUES (?,?,?,?,?,?)",
-                (submission_id, sub["workspace_id"], reviewer_id, sub["title"], "Direct Approval" if approve else "Request Changes", time.time()),
+                (submission_id, sub["workspace_id"], reviewer_id, sub["title"], "Direct Approval" if approve else "Request Changes", now),
             )
+            self._event(db, submission_id, "approved" if approve else "rejected", reviewer_id, self._latest_version(db, submission_id), "" if approve else comment.strip()[:2000])
+
+    def _can_see(self, db: _Conn, account_id: str, submission_id: int) -> dict:
+        """The submission, if this person is its creator, a reviewer of its workspace, or the workspace's manager."""
+        row = db.execute(
+            "SELECT s.*, "
+            "(SELECT purpose FROM accounts WHERE id = ?) AS viewer, "
+            "EXISTS (SELECT 1 FROM workspaces w WHERE w.id = s.workspace_id AND w.created_by = ?) AS owns, "
+            "EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = s.workspace_id AND m.user_id = ? AND m.role = 'Reviewer') AS reviews "
+            "FROM submissions s WHERE s.id = ?",
+            (account_id, account_id, account_id, submission_id),
+        ).fetchone()
+        if not row or not (row["creator_id"] == account_id or bool(row["owns"]) or bool(row["reviews"])):
+            raise Refused("That draft was not found.", 404)
+        return row
+
+    def add_comment(self, account_id: str, submission_id: int, body: str) -> None:
+        body = body.strip()
+        if not 1 <= len(body) <= 2000:
+            raise Refused("Write a comment of up to 2000 characters.")
+        with self._tx() as db:
+            self._can_see(db, account_id, submission_id)
+            self._event(db, submission_id, "comment", account_id, self._latest_version(db, submission_id), body)
+
+    def submission_detail(self, account_id: str, submission_id: int) -> dict:
+        """One draft with every version and its timeline (sent, cleared, approved, rejected, comments)."""
+        hit = self._detail_cache.get((account_id, submission_id))
+        if hit and hit[0] == self._version:
+            return hit[1]
+        with self._tx() as db:
+            sub = self._can_see(db, account_id, submission_id)
+            versions = db.execute(
+                "SELECT v.*, a.name AS author FROM submission_versions v LEFT JOIN accounts a ON a.id = v.author_id WHERE v.submission_id = ? ORDER BY v.version",
+                (submission_id,),
+            ).fetchall()
+            events = db.execute(
+                "SELECT e.*, a.name AS actor FROM submission_events e LEFT JOIN accounts a ON a.id = e.actor_id WHERE e.submission_id = ? ORDER BY e.id",
+                (submission_id,),
+            ).fetchall()
+            counts = db.execute("SELECT COALESCE(MAX(version), 1) AS version FROM submission_versions WHERE submission_id = ?", (submission_id,)).fetchone()
+        detail = {
+            "submission": self._sub_dict({**sub, "version": counts["version"], "comments": sum(1 for e in events if e["kind"] == "comment")}),
+            "versions": [
+                {"version": v["version"], "title": v["title"], "content": v["content"], "findings": json.loads(v["findings"]),
+                 "aiStatus": v["ai_status"], "by": v["author"] or "", "at": _ms(v["created_at"])}
+                for v in versions
+            ],
+            "events": [
+                {"id": e["id"], "kind": e["kind"], "by": e["actor"] or "ENGANO", "byId": e["actor_id"], "version": e["version"],
+                 "body": e["body"], "at": _ms(e["created_at"])}
+                for e in events
+            ],
+        }
+        self._detail_cache[(account_id, submission_id)] = (self._version, detail)
+        return detail
 
     # ---------------------------------------------------------------- reading
 
-    def _submission(self, db: sqlite3.Connection, submission_id: int) -> dict:
-        return self._sub_dict(db.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,)).fetchone())
+    _SUB_SQL = (
+        "SELECT s.*, "
+        "(SELECT COALESCE(MAX(v.version), 1) FROM submission_versions v WHERE v.submission_id = s.id) AS version, "
+        "(SELECT COUNT(*) FROM submission_events e WHERE e.submission_id = s.id AND e.kind = 'comment') AS comments "
+        "FROM submissions s"
+    )
 
     @staticmethod
-    def _sub_dict(r: sqlite3.Row) -> dict:
+    def _sub_dict(r: dict) -> dict:
         return {
             "id": r["id"],
             "title": r["title"],
             "content": r["content"],
             "findings": json.loads(r["findings"]),
             "status": r["status"],
-            "submittedAt": time.strftime("%d/%m/%Y %H:%M", time.localtime(r["created_at"])),
             "reviewerComment": r["reviewer_comment"],
             "workspaceId": r["workspace_id"],
             "creatorId": r["creator_id"],
             "approvedBy": r["approved_by"],
             "aiStatus": r["ai_status"],
             "at": _ms(r["created_at"]),
+            "version": int(r.get("version") or 1),
+            "comments": int(r.get("comments") or 0),
+            "submittedAt": time.strftime("%d/%m/%Y %H:%M", time.localtime(r["created_at"])),
         }
 
     def snapshot(self, account_id: str) -> dict:
         """Everything this person may see, shaped the way the web studio uses it."""
+        hit = self._snap_cache.get(account_id)
+        if hit and hit[0] == self._version and time.time() - hit[1] < SNAPSHOT_TTL:
+            return hit[2]
+        raw = self._snapshot_raw(account_id)
+        for w in raw["workspaces"]:
+            w["createdAt"] = _day(w.pop("t"))
+        for a in raw["assignments"]:
+            a["createdAt"] = _day(a.pop("t"))
+        for s in raw["submissions"]:
+            s["submittedAt"] = time.strftime("%d/%m/%Y %H:%M", time.localtime(s["at"] / 1000))
+        self._snap_cache[account_id] = (self._version, time.time(), raw)
+        return raw
+
+    def _snapshot_raw(self, account_id: str) -> dict:
         with self._tx() as db:
             me = self._me(db, account_id)
             purpose = me["purpose"]
@@ -589,57 +767,56 @@ class TeamStore:
 
             members = db.execute(f"SELECT * FROM members WHERE workspace_id IN ({marks}) ORDER BY id", ids).fetchall()
             requests = db.execute(f"SELECT * FROM requests WHERE workspace_id IN ({marks}) ORDER BY id", ids).fetchall() if purpose == "Business" else []
-            workspaces = []
-            for w in ws_rows:
-                workspaces.append(
-                    {
-                        "id": w["id"],
-                        "name": w["name"],
-                        # Only the manager sees the join code.
-                        "code": w["code"] if purpose == "Business" else "",
-                        "createdAt": time.strftime("%d/%m/%Y", time.localtime(w["created_at"])),
-                        "createdBy": w["created_by"],
-                        "members": [
-                            {"id": m["id"], "userId": m["user_id"], "role": m["role"]}
-                            for m in members
-                            if m["workspace_id"] == w["id"] and (purpose != "Content Creator" or m["user_id"] == account_id)
-                        ],
-                        "requests": [{"id": r["id"], "userId": r["user_id"]} for r in requests if r["workspace_id"] == w["id"]],
-                    }
-                )
+            workspaces = [
+                {
+                    "id": w["id"],
+                    "name": w["name"],
+                    # Only the manager sees the join code.
+                    "code": w["code"] if purpose == "Business" else "",
+                    "t": w["created_at"],
+                    "createdBy": w["created_by"],
+                    "members": [
+                        {"id": m["id"], "userId": m["user_id"], "role": m["role"]}
+                        for m in members
+                        if m["workspace_id"] == w["id"] and (purpose != "Content Creator" or m["user_id"] == account_id)
+                    ],
+                    "requests": [{"id": r["id"], "userId": r["user_id"]} for r in requests if r["workspace_id"] == w["id"]],
+                }
+                for w in ws_rows
+            ]
 
             assignments = [
                 {"id": a["id"], "workspaceId": a["workspace_id"], "title": a["title"], "description": a["description"],
-                 "dueDate": a["due_date"], "createdAt": time.strftime("%d/%m/%Y", time.localtime(a["created_at"]))}
-                for a in db.execute(f"SELECT * FROM assignments WHERE workspace_id IN ({marks}) ORDER BY id DESC", ids)
+                 "dueDate": a["due_date"], "t": a["created_at"]}
+                for a in db.execute(f"SELECT * FROM assignments WHERE workspace_id IN ({marks}) ORDER BY id DESC", ids).fetchall()
             ]
             guidelines: dict[str, list] = {str(i): [] for i in ids}
-            for g in db.execute(f"SELECT * FROM guidelines WHERE workspace_id IN ({marks}) ORDER BY id", ids):
+            for g in db.execute(f"SELECT * FROM guidelines WHERE workspace_id IN ({marks}) ORDER BY id", ids).fetchall():
                 guidelines[str(g["workspace_id"])].append({"id": g["id"], "type": g["kind"], "text": g["text"]})
 
             if purpose == "Content Creator":
-                subs = db.execute("SELECT * FROM submissions WHERE creator_id = ? ORDER BY id DESC", (account_id,)).fetchall()
+                subs = db.execute(self._SUB_SQL + " WHERE s.creator_id = ? ORDER BY s.id DESC", (account_id,)).fetchall()
             else:
-                subs = db.execute(f"SELECT * FROM submissions WHERE workspace_id IN ({marks}) ORDER BY id DESC", ids).fetchall()
+                subs = db.execute(self._SUB_SQL + f" WHERE s.workspace_id IN ({marks}) ORDER BY s.id DESC", ids).fetchall()
             actions = [
                 {"id": a["id"], "submissionId": a["submission_id"], "workspaceId": a["workspace_id"], "title": a["title"],
                  "action": a["action"], "createdAt": "", "reviewerId": a["reviewer_id"], "at": _ms(a["created_at"])}
-                for a in db.execute(f"SELECT * FROM reviewer_actions WHERE workspace_id IN ({marks}) ORDER BY id DESC", ids)
+                for a in db.execute(f"SELECT * FROM reviewer_actions WHERE workspace_id IN ({marks}) ORDER BY id DESC", ids).fetchall()
                 if purpose != "Reviewer" or a["reviewer_id"] == account_id
             ] if purpose != "Content Creator" else []
             # Names for everyone this person can see; ids themselves are never shown.
             wanted = {m["user_id"] for m in members} | {s["creator_id"] for s in subs} | {a["reviewerId"] for a in actions}
             wanted |= {r["user_id"] for r in requests} | {w["created_by"] for w in ws_rows} | {account_id}
             people = {}
-            for pid in wanted:
-                row = db.execute("SELECT name FROM accounts WHERE id = ?", (pid,)).fetchone()
-                if row:
-                    people[pid] = row["name"]
+            if wanted:
+                names = db.execute(f"SELECT id, name FROM accounts WHERE id IN ({','.join('?' * len(wanted))})", list(wanted)).fetchall()
+                people = {n["id"]: n["name"] for n in names}
 
-            directory = []
-            my_reviewers = []
+            directory: list = []
+            my_reviewers: list = []
+            pending = None
             if purpose == "Content Creator":
-                for m in db.execute("SELECT id, name, brand FROM accounts WHERE purpose = 'Business' ORDER BY brand"):
+                for m in db.execute("SELECT id, name, brand FROM accounts WHERE purpose = 'Business' ORDER BY lower(brand)").fetchall():
                     spaces = db.execute("SELECT id, name FROM workspaces WHERE created_by = ? ORDER BY id", (m["id"],)).fetchall()
                     directory.append(
                         {"managerId": m["id"], "managerName": m["name"], "brand": m["brand"],
@@ -648,12 +825,10 @@ class TeamStore:
                 pending = db.execute(
                     "SELECT w.id, w.name FROM requests r JOIN workspaces w ON w.id = r.workspace_id WHERE r.user_id = ?", (account_id,)
                 ).fetchone()
-            else:
-                pending = None
             if purpose == "Business":
                 my_reviewers = [
                     {"id": r["id"], "name": r["name"], "email": r["email"]}
-                    for r in db.execute("SELECT id, name, email FROM accounts WHERE purpose = 'Reviewer' AND created_by = ? ORDER BY name", (account_id,))
+                    for r in db.execute("SELECT id, name, email FROM accounts WHERE purpose = 'Reviewer' AND created_by = ? ORDER BY name", (account_id,)).fetchall()
                 ]
             return {
                 "me": me,
@@ -667,3 +842,56 @@ class TeamStore:
                 "pendingRequest": {"id": pending["id"], "name": pending["name"]} if pending else None,
                 "myReviewers": my_reviewers,
             }
+
+
+class PgTeamStore(TeamStore):
+    """The same store on Supabase Postgres. Connections come from a small pool that stays open."""
+
+    pg = True
+
+    def __init__(self, url: str, schema: str | None = None):
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        self.path = "supabase"
+        self._memory = None
+        options = f"-c search_path={schema}" if schema else None
+        kwargs: dict[str, Any] = {"row_factory": dict_row, "prepare_threshold": None, "connect_timeout": 20}
+        if options:
+            kwargs["options"] = options
+        self._pool = ConnectionPool(url, min_size=1, max_size=4, kwargs=kwargs, open=False, timeout=45, max_idle=600)
+        self._pool.open(wait=False)
+        self._version = 0
+        self._snap_cache, self._acct_cache, self._scope_cache, self._detail_cache = {}, {}, {}, {}
+        self._setup()
+
+    def _setup(self) -> None:
+        with self._tx() as db:
+            if not db.execute("SELECT to_regclass('submission_events') AS t").fetchone()["t"]:
+                raise RuntimeError("The ENGANO tables are missing in Supabase. Run `make migrate` first.")
+        self._finish_setup()
+
+    @contextmanager
+    def _tx(self) -> Iterator[_Conn]:
+        with self._pool.connection() as raw:
+            db = _Conn(raw, True)
+            yield db
+        if db.wrote:
+            self._version += 1
+
+    def _snapshot_raw(self, account_id: str) -> dict:
+        with self._tx() as db:
+            row = db.execute("SELECT engano_snapshot(?) AS snap", (account_id,)).fetchone()
+        return row["snap"]
+
+    def close(self) -> None:
+        self._pool.close()
+
+
+def open_team_store(default_sqlite: str | Path) -> TeamStore:
+    """Supabase when a database URL is set (and no explicit SQLite file is asked for); otherwise SQLite."""
+    explicit = os.getenv("ENGANO_DB_PATH")
+    url = os.getenv("SUPABASE_DB_URL", "").strip()
+    if not explicit and url:
+        return PgTeamStore(url)
+    return TeamStore(explicit or default_sqlite)

@@ -167,6 +167,10 @@ export function useEngano(token: string, onExpired: () => void) {
         return e instanceof Error ? e.message : 'Could not send the test.'
       }
     },
+    /** One draft with every version and its timeline. */
+    fetchDetail: (id: number) => api.current.detail(id),
+    /** Add a comment to a draft. Returns an error message, or null. */
+    comment: (id: number, body: string) => act(() => api.current.comment(id, body), true),
     approve: (submission: ReviewSubmission) => act(() => api.current.approve(submission.id)),
     reject: (submission: ReviewSubmission, comment: string) => act(() => api.current.reject(submission.id, comment)),
   }

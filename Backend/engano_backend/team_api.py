@@ -75,6 +75,10 @@ class ContactIn(BaseModel):
     discord_id: str = Field(default="", max_length=40)
 
 
+class CommentIn(BaseModel):
+    body: str = Field(max_length=2100)
+
+
 class Reject(BaseModel):
     comment: str = Field(max_length=2000)
 
@@ -260,6 +264,16 @@ def build_router(store: TeamStore, mirror: AuthMirror | None = None, notifier: R
         if not (contact["whatsapp"] or contact["discord_id"]):
             raise HTTPException(status_code=400, detail="Save a WhatsApp number or Discord ID first.")
         return await notifier.send(contact, "ENGANO: this is a test. You will get review requests here.")
+
+    @router.get("/app/submissions/{submission_id}")
+    def submission_detail(submission_id: int, me: dict = Depends(current)):
+        """One draft with every version and its timeline (sent, cleared, approved, rejected, comments)."""
+        return run(store.submission_detail, me["id"], submission_id)
+
+    @router.post("/app/submissions/{submission_id}/comments")
+    def add_comment(submission_id: int, body: CommentIn, me: dict = Depends(current)):
+        run(store.add_comment, me["id"], submission_id, body.body)
+        return {"ok": True}
 
     @router.post("/app/submissions/{submission_id}/approve")
     def approve(submission_id: int, me: dict = Depends(current)):

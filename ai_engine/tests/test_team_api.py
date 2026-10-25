@@ -1,5 +1,7 @@
 """Accounts, workspaces and the review pipeline: who can do what."""
 
+import os
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -8,9 +10,41 @@ from ai_engine.integrations.supabase_policy_repository import MockPolicyReposito
 from ai_engine.memory.store import FileBrandMemoryStore
 from engano_backend.app import create_app
 from engano_backend.review_service import ReviewService, ReviewSettings
-from engano_backend.team_store import TeamStore
+from engano_backend.team_store import PgTeamStore, TeamStore
 
 PW = "password123"
+
+# Set ENGANO_TEST_PG_URL to run this whole file against Postgres in a throwaway schema.
+import pathlib, secrets as _secrets  # noqa: E402
+
+MIGRATION = pathlib.Path("supabase/migrations/20261025_000006_team_app.sql")
+_SCHEMAS: list = []
+
+
+def new_store(tmp_path, name="t.db"):
+    url = os.getenv("ENGANO_TEST_PG_URL")
+    if not url:
+        return TeamStore(tmp_path / name)
+    import psycopg
+
+    schema = "engano_t_" + _secrets.token_hex(4)
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(f"CREATE SCHEMA {schema}")
+        conn.execute(f"SET search_path TO {schema}")
+        conn.execute(MIGRATION.read_text())
+    _SCHEMAS.append((url, schema))
+    return PgTeamStore(url, schema)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _drop_scratch_schemas():
+    yield
+    if _SCHEMAS:
+        import psycopg
+
+        with psycopg.connect(_SCHEMAS[0][0], autocommit=True) as conn:
+            for _, schema in _SCHEMAS:
+                conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
 def make_client(tmp_path, db="t.db", **kw):
@@ -21,7 +55,7 @@ def make_client(tmp_path, db="t.db", **kw):
         repository=repo,
         memory_store=FileBrandMemoryStore(storage_dir=tmp_path),
     )
-    return TestClient(create_app(review_service=service, engine_config=EngineConfig(), team_store=TeamStore(tmp_path / db), **kw))
+    return TestClient(create_app(review_service=service, engine_config=EngineConfig(), team_store=new_store(tmp_path, db), **kw))
 
 
 @pytest.fixture
@@ -505,3 +539,98 @@ def test_a_client_cannot_supply_its_own_rules_or_scope(client):
     r = client.post("/api/review", json={"text": "cheap", "workspace_rules": [], "scope": "x"}, headers=kate)
     assert r.status_code == 200
     assert any(f["category"] == "brand_guideline" for f in r.json()["findings"])
+
+
+# ----------------------------------------------------- revision history and comments
+
+def detail(c, who, sid):
+    r = c.get(f"/api/app/submissions/{sid}", headers=who)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_every_version_and_event_is_kept(client):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "Launch", "content": BAD, "ai_status": "RED"}, headers=kate).json()["id"]
+    d = detail(client, kate, sid)
+    assert [v["version"] for v in d["versions"]] == [1] and d["versions"][0]["content"] == BAD
+    assert [e["kind"] for e in d["events"]] == ["submitted"] and d["events"][0]["by"] == "Kate"
+    client.post(f"/api/app/submissions/{sid}/reject", json={"comment": "Remove the uptime claim."}, headers=rita)
+    receipt, _ = review(client, CLEAN, kate)
+    client.post("/api/app/submissions", json={"title": "Launch", "content": CLEAN, "receipt": receipt, "editing_id": sid}, headers=kate)
+    d = detail(client, boss, sid)
+    assert [v["version"] for v in d["versions"]] == [1, 2]
+    assert [v["content"] for v in d["versions"]] == [BAD, CLEAN]
+    assert [e["kind"] for e in d["events"]] == ["submitted", "rejected", "resubmitted", "cleared"]
+    rejected = d["events"][1]
+    assert (rejected["by"], rejected["body"], rejected["version"]) == ("Rita", "Remove the uptime claim.", 1)
+    assert d["events"][3]["by"] == "ENGANO"
+    assert d["submission"]["version"] == 2 and d["submission"]["status"] == "Approved"
+
+
+def test_approval_is_in_the_timeline_and_the_snapshot_counts_versions_and_comments(client):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "A", "content": BAD}, headers=kate).json()["id"]
+    client.post(f"/api/app/submissions/{sid}/approve", headers=rita)
+    assert [e["kind"] for e in detail(client, rita, sid)["events"]] == ["submitted", "approved"]
+    client.post(f"/api/app/submissions/{sid}/comments", json={"body": "Looks fine now."}, headers=boss)
+    row = client.get("/api/app/state", headers=kate).json()["submissions"][0]
+    assert (row["version"], row["comments"]) == (1, 1)
+
+
+def test_creator_reviewer_and_manager_can_comment_and_see_the_thread(client):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "A", "content": BAD}, headers=kate).json()["id"]
+    for who, text in ((kate, "Question: is 99.95 right?"), (rita, "Yes, use the SLA wording."), (boss, "Agreed.")):
+        assert client.post(f"/api/app/submissions/{sid}/comments", json={"body": text}, headers=who).status_code == 200
+    for who in (kate, rita, boss):
+        thread = [(e["by"], e["body"]) for e in detail(client, who, sid)["events"] if e["kind"] == "comment"]
+        assert thread == [("Kate", "Question: is 99.95 right?"), ("Rita", "Yes, use the SLA wording."), ("Boss", "Agreed.")]
+
+
+def test_outsiders_cannot_read_or_comment(client):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "A", "content": BAD}, headers=kate).json()["id"]
+    other_boss = sign_up(client, "Other", "Business", "Other Co")
+    other_creator = sign_up(client, "Out", "Content Creator")
+    ows = client.post("/api/app/workspaces", json={"name": "Elsewhere"}, headers=other_boss).json()["id"]
+    stray = client.post(f"/api/app/workspaces/{ows}/reviewers", json={"name": "Stray", "email": "stray@x.com"}, headers=other_boss).json()
+    stray_h = {"Authorization": "Bearer " + client.post("/api/auth/signin", json={"email": "stray@x.com", "password": stray["password"]}).json()["token"]}
+    for who in (other_boss, other_creator, stray_h):
+        assert client.get(f"/api/app/submissions/{sid}", headers=who).status_code == 404
+        assert client.post(f"/api/app/submissions/{sid}/comments", json={"body": "hi"}, headers=who).status_code == 404
+    assert client.get(f"/api/app/submissions/{sid}").status_code == 401
+    assert client.get("/api/app/submissions/99999", headers=kate).status_code == 404
+
+
+@pytest.mark.parametrize("body", ["", "   ", "x" * 2001])
+def test_comments_must_have_a_sensible_length(client, body):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "A", "content": BAD}, headers=kate).json()["id"]
+    assert client.post(f"/api/app/submissions/{sid}/comments", json={"body": body}, headers=kate).status_code in (400, 422)
+
+
+def test_a_new_comment_shows_up_without_waiting(client):
+    boss, rita, kate, _ = team(client)
+    sid = client.post("/api/app/submissions", json={"title": "A", "content": BAD}, headers=kate).json()["id"]
+    assert detail(client, kate, sid)["events"][-1]["kind"] == "submitted"
+    client.post(f"/api/app/submissions/{sid}/comments", json={"body": "ping"}, headers=rita)
+    assert detail(client, kate, sid)["events"][-1]["body"] == "ping"  # cached views are dropped by any write
+
+
+def test_old_drafts_get_a_first_version_and_a_timeline(tmp_path):
+    store = new_store(tmp_path, "old.db")
+    _, boss = store.sign_up("Boss", "boss@x.com", PW, "Business", "Acme")
+    ws = store.create_workspace(boss["id"], "Team")
+    _, kate = store.sign_up("Kate", "kate@x.com", PW, "Content Creator", None)
+    code = store.snapshot(boss["id"])["workspaces"][0]["code"]
+    store.join_by_code(kate["id"], code)
+    sub = store.submit(kate["id"], "Old", BAD, [], "RED", None, None)
+    with store._tx() as db:  # simulate a draft made before history existed
+        db.execute("DELETE FROM submission_events WHERE submission_id = ?", (sub["id"],))
+        db.execute("DELETE FROM submission_versions WHERE submission_id = ?", (sub["id"],))
+    with store._tx() as db:
+        store._backfill_history(db)
+    d = store.submission_detail(kate["id"], sub["id"])
+    assert [v["version"] for v in d["versions"]] == [1] and [e["kind"] for e in d["events"]] == ["submitted"]
+    assert ws  # the workspace exists

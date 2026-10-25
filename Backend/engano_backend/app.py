@@ -27,7 +27,7 @@ from .review_service import ReviewService, ReviewSettings
 from .auth_mirror import AuthMirror
 from .notify import ReviewerNotifier
 from .team_api import build_router as build_team_router
-from .team_store import TeamStore
+from .team_store import TeamStore, open_team_store
 from .website import SiteError
 
 log = logging.getLogger("engano.backend")
@@ -102,9 +102,8 @@ def create_app(
     notifier: ReviewerNotifier | None = None,
 ) -> FastAPI:
     escalation = escalation or EscalationSettings.from_env()
-    team_store = team_store or TeamStore(
-        os.getenv("ENGANO_DB_PATH") or Path(__file__).resolve().parent.parent / ".data" / "engano.db"
-    )
+    # Supabase when a database URL is configured; otherwise a local SQLite file (ENGANO_DB_PATH or Backend/.data).
+    team_store = team_store or open_team_store(Path(__file__).resolve().parent.parent / ".data" / "engano.db")
     review_service = review_service or ReviewService(ReviewSettings.from_env())
 
     whatsapp_settings = whatsapp_settings or WhatsAppSettings.from_env()

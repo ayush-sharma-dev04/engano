@@ -3,11 +3,12 @@ import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router'
 import type { Assignment, ReviewSubmission } from './model'
 import { PeopleContext } from './people'
 import { useEngano, type DraftOut } from './useEngano'
+import type { SubmissionDetailData } from './appApi'
 import Shell, { type NavItem } from './components/Shell'
 import BrandGuidelines from './components/BrandGuidelines'
 import Insights from './components/Insights'
 import ReviewQueue from './components/ReviewQueue'
-import { Empty, PageHeader, Pill } from './ui'
+import { Empty, Loader, PageHeader, Pill } from './ui'
 import Studio from './pages/Studio'
 import Assignments from './pages/Assignments'
 import MySubmissions from './pages/MySubmissions'
@@ -116,7 +117,7 @@ export default function Dashboard({ token, onLogout }: Props) {
       <div className="relative flex min-h-screen items-center justify-center text-white">
         <div className="aurora" aria-hidden="true" />
         <div className="relative z-10 text-center">
-          <p className="text-sm text-slate-400">{data.error ?? 'Loading your workspace…'}</p>
+          {data.error ? <p className="text-sm text-slate-400">{data.error}</p> : <Loader label="Loading your workspace…" />}
           {data.error && (
             <button onClick={() => void data.refresh()} className="btn-primary mt-4 px-5 py-2.5 text-sm">
               Try again
@@ -171,7 +172,7 @@ export default function Dashboard({ token, onLogout }: Props) {
       case 'queue':
         return <ReviewQueue submissions={data.submissions} onOpenSubmission={(s) => navigate(`/queue/${s.id}`)} />
       case 'approvals':
-        return <MySubmissions submissions={data.submissions} onEdit={editSubmission} />
+        return <MySubmissions submissions={data.submissions} onEdit={editSubmission} onOpen={(s) => navigate(`/approvals/${s.id}`)} />
       case 'history':
         return <ReviewerHistory userId={data.userId} actions={data.reviewerActions} />
       case 'guidelines':
@@ -186,7 +187,7 @@ export default function Dashboard({ token, onLogout }: Props) {
           <Empty title="Open a workspace first">Guidelines belong to a workspace. Pick one under Workspaces.</Empty>
         )
       case 'approved':
-        return <ApprovedDrafts workspaces={data.managed} submissions={data.submissions} />
+        return <ApprovedDrafts workspaces={data.managed} submissions={data.submissions} onOpen={(s) => navigate(`/approved/${s.id}`)} />
       case 'overview':
         return <Overview workspaces={data.managed} submissions={data.submissions} actions={data.reviewerActions} />
       case 'insights':
@@ -264,7 +265,16 @@ export default function Dashboard({ token, onLogout }: Props) {
             <Route key={n.id} path={n.id} element={n.id === 'studio' ? null : page(n.id)} />
           ))}
           {role === 'Reviewer' && (
-            <Route path="queue/:id" element={<QueueDetail submissions={data.submissions} onDecide={decide} />} />
+            <Route path="queue/:id" element={<DraftRoute back={{ label: 'Back to Review Queue', to: '/queue' }} load={data.fetchDetail} onComment={data.comment} onDecide={decide} />} />
+          )}
+          {role === 'Creator' && (
+            <Route
+              path="approvals/:id"
+              element={<DraftRoute back={{ label: 'Back to Approvals', to: '/approvals' }} load={data.fetchDetail} onComment={data.comment} onEdit={editSubmission} />}
+            />
+          )}
+          {role === 'Brand Manager' && (
+            <Route path="approved/:id" element={<DraftRoute back={{ label: 'Back to Approved drafts', to: '/approved' }} load={data.fetchDetail} onComment={data.comment} />} />
           )}
           <Route path="*" element={<Navigate to={`/${nav[0].id}`} replace />} />
         </Route>
@@ -288,25 +298,34 @@ export default function Dashboard({ token, onLogout }: Props) {
   )
 }
 
-/** One draft in the reviewer's queue, addressed by the URL (/queue/12). */
-function QueueDetail({
-  submissions,
+/** One draft, addressed by the URL (/queue/12, /approvals/12, /approved/12). What you can do depends on who you are. */
+function DraftRoute({
+  back,
+  load,
+  onComment,
   onDecide,
+  onEdit,
 }: {
-  submissions: ReviewSubmission[]
-  onDecide: (submission: ReviewSubmission, approve: boolean, comment?: string) => void
+  back: { label: string; to: string }
+  load: (id: number) => Promise<SubmissionDetailData>
+  onComment: (id: number, body: string) => Promise<string | null>
+  onDecide?: (submission: ReviewSubmission, approve: boolean, comment?: string) => void
+  onEdit?: (submission: ReviewSubmission) => void
 }) {
   const { id } = useParams()
   const navigate = useNavigate()
-  const submission = submissions.find((s) => String(s.id) === id)
-  if (!submission) return <Navigate to="/queue" replace />
+  if (!id || Number.isNaN(Number(id))) return <Navigate to={back.to} replace />
   return (
     <SubmissionDetail
-      key={submission.id}
-      submission={submission}
-      onBack={() => navigate('/queue')}
-      onApprove={() => onDecide(submission, true)}
-      onRequestChanges={(comment) => onDecide(submission, false, comment)}
+      key={id}
+      id={Number(id)}
+      load={load}
+      onComment={onComment}
+      backLabel={back.label}
+      onBack={() => navigate(back.to)}
+      onApprove={onDecide ? (s) => onDecide(s, true) : undefined}
+      onReject={onDecide ? (s, comment) => onDecide(s, false, comment) : undefined}
+      onEdit={onEdit}
     />
   )
 }

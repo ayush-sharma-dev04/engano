@@ -1,4 +1,5 @@
 // Client for the accounts, workspaces and review-pipeline routes of the ENGANO backend.
+import type { Finding } from './App'
 import type { Assignment, Guideline, Member, Purpose, ReviewerAction, ReviewSubmission } from './model'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000'
@@ -43,6 +44,21 @@ export type Snapshot = {
   pendingRequest: { id: number; name: string } | null
   myReviewers: { id: string; name: string; email: string }[]
 }
+
+export type VersionInfo = { version: number; title: string; content: string; findings: Finding[]; aiStatus: string | null; by: string; at: number }
+
+export type EventInfo = {
+  id: number
+  kind: 'submitted' | 'resubmitted' | 'cleared' | 'approved' | 'rejected' | 'comment'
+  by: string
+  byId: string | null
+  version: number
+  body: string
+  at: number
+}
+
+/** One draft with every version and its timeline. */
+export type SubmissionDetailData = { submission: ReviewSubmission; versions: VersionInfo[]; events: EventInfo[] }
 
 /** The server said no (or could not be reached). `status` is 401 when the sign-in has expired. */
 export class ApiError extends Error {
@@ -120,6 +136,8 @@ export function team(token: string) {
     saveContact: (whatsapp: string, discordId: string) => call<Me>('PUT', '/api/app/me/contact', token, { whatsapp, discord_id: discordId }),
     testContact: () => call<Record<string, string>>('POST', '/api/app/me/contact/test', token),
     submit: (b: DraftBody) => call<ReviewSubmission>('POST', '/api/app/submissions', token, b),
+    detail: (id: number) => call<SubmissionDetailData>('GET', `/api/app/submissions/${id}`, token),
+    comment: (id: number, body: string) => call('POST', `/api/app/submissions/${id}/comments`, token, { body }),
     approve: (id: number) => call('POST', `/api/app/submissions/${id}/approve`, token),
     reject: (id: number, comment: string) => call('POST', `/api/app/submissions/${id}/reject`, token, { comment }),
   }
