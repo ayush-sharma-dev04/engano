@@ -1,4 +1,4 @@
-# ENGANO -- AI/ML Brand Governance Engine
+# ENGANO -- AI/ML 
 
 The ENGANO AI/ML Review Engine is an automated, high-performance brand governance and policy enforcement package. It evaluates draft content against structured brand rules, detects policy violations, cites authoritative guidelines or brand facts, and routes decisions based on risk severity (GREEN, YELLOW, or RED).
 
