@@ -13,7 +13,7 @@ OLLAMA_MODEL := $(or $(shell sed -n 's/^OLLAMA_MODEL=//p' .env 2>/dev/null),qwen
 OLLAMA_URL   := http://localhost:11434
 
 .DEFAULT_GOAL := help
-.PHONY: help pull setup renderer renderer-up migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
+.PHONY: api-url help pull setup renderer renderer-up migrate migrate-status seed start ollama discord backend gmail tunnel webhook linkedin web test benchmark clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -71,6 +71,7 @@ start: setup ## Start everything: Ollama (if AI_PROVIDER=ollama), backend, Disco
 	if command -v cloudflared >/dev/null; then \
 		$(MAKE) --no-print-directory tunnel & \
 		$(PY) -m engano_whatsapp.register_webhook --wait --metrics $(TUNNEL_METRICS) --port $(PORT) & \
+		$(PY) -m engano_backend.public_url --wait --metrics $(TUNNEL_METRICS) & \
 	else echo "Tunnel: cloudflared not installed, WhatsApp won't receive messages"; fi; \
 	if [ -f Frontend/package.json ]; then $(MAKE) --no-print-directory web & else echo "Frontend: no package.json, skipping"; fi; \
 	wait
@@ -101,6 +102,9 @@ linkedin: ## Connect a LinkedIn account (opens the sign-in page; backend must be
 
 tunnel: ## Public HTTPS URL for the backend (then `make webhook`; `make start` does both)
 	cloudflared tunnel --no-autoupdate --loglevel warn --metrics $(TUNNEL_METRICS) --url http://localhost:$(PORT)
+
+api-url: ## Show the backend's public address and the link that points the hosted site at it
+	$(PY) -m engano_backend.public_url --metrics $(TUNNEL_METRICS)
 
 webhook: ## Point Meta's WhatsApp webhook at the running tunnel (or URL=https://...)
 	$(PY) -m engano_whatsapp.register_webhook --metrics $(TUNNEL_METRICS) $(if $(URL),--url $(URL))

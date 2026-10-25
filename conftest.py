@@ -15,6 +15,12 @@ def _app_database_in_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _open_endpoints_for_tests(monkeypatch):
+    """Most tests call /api/review without signing in; the login requirement has its own tests."""
+    monkeypatch.setenv("ENGANO_REQUIRE_LOGIN", "0")
+
+
+@pytest.fixture(autouse=True)
 def _never_touch_the_real_supabase(monkeypatch):
     """Test accounts must never be mirrored into the developer's real Supabase Auth."""
     for name in ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_DB_URL"):

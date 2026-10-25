@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Icon } from '../ui'
 import { FIELD } from '../styles'
+import ServerAddress from '../components/ServerAddress'
 import { auth, type Me } from '../appApi'
 import type { Purpose } from '../model'
 
@@ -209,6 +210,7 @@ export default function SignIn({ onSignedIn }: Props) {
               Reviewers don’t sign up: a Brand Manager creates their account.
             </p>
           </form>
+          <ServerAddress />
         </div>
       </div>
     </div>

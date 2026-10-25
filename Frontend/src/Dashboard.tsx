@@ -5,6 +5,7 @@ import { PeopleContext } from './people'
 import { useEngano, type DraftOut } from './useEngano'
 import type { SubmissionDetailData } from './appApi'
 import Shell, { type NavItem } from './components/Shell'
+import ServerAddress from './components/ServerAddress'
 import BrandGuidelines from './components/BrandGuidelines'
 import Insights from './components/Insights'
 import ReviewQueue from './components/ReviewQueue'
@@ -118,6 +119,7 @@ export default function Dashboard({ token, onLogout }: Props) {
         <div className="aurora" aria-hidden="true" />
         <div className="relative z-10 text-center">
           {data.error ? <p className="text-sm text-slate-400">{data.error}</p> : <Loader label="Loading your workspace…" />}
+          {data.error && <ServerAddress />}
           {data.error && (
             <button onClick={() => void data.refresh()} className="btn-primary mt-4 px-5 py-2.5 text-sm">
               Try again

@@ -1,7 +1,7 @@
-// Client for the ENGANO backend (FastAPI). Base URL comes from VITE_API_URL.
+// Client for the ENGANO backend (FastAPI). The address comes from apiUrl.ts.
 import type { Finding } from './App'
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000'
+import { apiBase } from './apiUrl'
 
 type ApiFinding = {
   severity: 'low' | 'medium' | 'high' | 'critical'
@@ -77,7 +77,7 @@ export async function reviewDraft(
 ): Promise<{ findings: Finding[]; summary: ReviewSummary }> {
   let response: Response
   try {
-    response = await fetch(`${API_URL}/api/review`, {
+    response = await fetch(`${apiBase()}/api/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({
@@ -87,9 +87,16 @@ export async function reviewDraft(
       }),
     })
   } catch {
-    throw new Error(`Could not reach the ENGANO backend at ${API_URL}. Is it running?`)
+    throw new Error(`Could not reach the ENGANO backend at ${apiBase()}. Is it running?`)
   }
   if (!response.ok) {
+    let detail: unknown = ''
+    try {
+      detail = ((await response.json()) as { detail?: unknown }).detail
+    } catch {
+      /* not JSON */
+    }
+    if ((response.status === 401 || response.status === 429) && typeof detail === 'string') throw new Error(detail)
     throw new Error(response.status === 422 ? 'The draft is empty or too long (max 10,000 characters).' : 'The review service is unavailable. Try again shortly.')
   }
   const mapped = mapResult((await response.json()) as ApiResult)
@@ -149,16 +156,16 @@ export type SiteInfo = {
   facts: Record<string, unknown>
 }
 
-export async function checkWebsite(url: string): Promise<{ findings: Finding[]; summary: ReviewSummary; site: SiteInfo }> {
+export async function checkWebsite(url: string, token: string | null = null): Promise<{ findings: Finding[]; summary: ReviewSummary; site: SiteInfo }> {
   let response: Response
   try {
-    response = await fetch(`${API_URL}/api/check-website`, {
+    response = await fetch(`${apiBase()}/api/check-website`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ url }),
     })
   } catch {
-    throw new Error(`Could not reach the ENGANO backend at ${API_URL}. Is it running?`)
+    throw new Error(`Could not reach the ENGANO backend at ${apiBase()}. Is it running?`)
   }
   if (!response.ok) {
     let detail = ''
@@ -167,7 +174,7 @@ export async function checkWebsite(url: string): Promise<{ findings: Finding[]; 
     } catch {
       /* not JSON */
     }
-    throw new Error(response.status === 422 && typeof detail === 'string' ? detail : 'Website checks are unavailable. Try again shortly.')
+    throw new Error([401, 422, 429].includes(response.status) && typeof detail === 'string' ? detail : 'Website checks are unavailable. Try again shortly.')
   }
   const data = (await response.json()) as {
     url: string

@@ -109,7 +109,7 @@ export default function Studio({
   const startLinked = (url: string) => {
     const turn = turnId.current
     placeLinked(turn, { url, status: 'loading' })
-    checkWebsite(url)
+    checkWebsite(url, token)
       .then((result) => placeLinked(turn, { url, status: 'done', ...result }))
       .catch((error) =>
         placeLinked(turn, { url, status: 'error', error: error instanceof Error ? error.message : 'The link check failed.' })
@@ -179,7 +179,7 @@ export default function Studio({
     setReviewError(null)
     setReviewSummary(null)
     try {
-      const result = await checkWebsite(siteUrl.trim())
+      const result = await checkWebsite(siteUrl.trim(), token)
       setHidden(new Set())
       setFindings(result.findings)
       setReviewSummary(result.summary)

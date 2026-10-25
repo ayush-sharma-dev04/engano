@@ -2,7 +2,7 @@
 import type { Finding } from './App'
 import type { Assignment, Guideline, Member, Purpose, ReviewerAction, ReviewSubmission } from './model'
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000'
+import { apiBase } from './apiUrl'
 
 export type Me = {
   id: string
@@ -72,13 +72,13 @@ export class ApiError extends Error {
 async function call<T>(method: string, path: string, token: string | null, body?: unknown): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetch(`${apiBase()}${path}`, {
       method,
       headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new ApiError(`Could not reach the ENGANO backend at ${API_URL}. Is it running?`, 0)
+    throw new ApiError(`Could not reach the ENGANO backend at ${apiBase()}. Is it running?`, 0)
   }
   if (!response.ok) {
     let detail = 'Something went wrong. Try again.'

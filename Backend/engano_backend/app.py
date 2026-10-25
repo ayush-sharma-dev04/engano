@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import secrets
+import time
 import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -83,9 +84,38 @@ class SiteCheckResponse(BaseModel):
     result: ReviewResult
 
 
+class _Limiter:
+    """At most `limit` calls per `window` seconds for each key (in memory, per process)."""
+
+    def __init__(self) -> None:
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, key: str, limit: int, window: float = 600.0) -> bool:
+        now = time.monotonic()
+        recent = [t for t in self._hits.get(key, []) if now - t < window]
+        if len(recent) >= limit:
+            self._hits[key] = recent
+            return False
+        recent.append(now)
+        self._hits[key] = recent
+        return True
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
 def _cors_origins() -> list[str]:
     raw = os.getenv("ENGANO_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+# On the open internet the studio's heavy endpoints need a signed-in person. Set ENGANO_REQUIRE_LOGIN=0 only for local experiments.
+def _login_required() -> bool:
+    return os.getenv("ENGANO_REQUIRE_LOGIN", "1").strip().lower() not in ("0", "false", "no")
 
 
 def create_app(
@@ -130,6 +160,8 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
+        # e.g. https://[a-z0-9-]+\\.netlify\\.app to allow a hosted site and its deploy previews
+        allow_origin_regex=os.getenv("ENGANO_CORS_ORIGIN_REGEX") or None,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["X-Review-Receipt"],
@@ -158,12 +190,25 @@ def create_app(
             "linkedin_connected": bool(linkedin_token and not linkedin_token.expired),
         }
 
+    limiter = _Limiter()
+
+    def signed_in(authorization: str | None, doing: str, limit_env: str, default_limit: int, kind: str) -> dict | None:
+        """The signed-in person, or a 401 when login is required. Each person gets a fair share of the heavy work."""
+        token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
+        me = team_store.account_for(token)
+        if not me:
+            if _login_required():
+                raise HTTPException(status_code=401, detail=f"Sign in to {doing}.")
+            return None
+        if not limiter.allow(f"{kind}:{me['id']}", _int_env(limit_env, default_limit)):
+            raise HTTPException(status_code=429, detail="That's a lot in a short time. Wait a few minutes and try again.")
+        return me
+
     @app.post("/api/review", response_model=ReviewResult)
     async def review(request: ReviewRequest, response: Response, authorization: str | None = Header(default=None)):
         """Run the full multi-agent review on a draft for the configured brand."""
         # A creator signed in to a workspace is also checked against that workspace's own DO/DON'T rules.
-        token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
-        me = team_store.account_for(token)
+        me = signed_in(authorization, "run reviews", "ENGANO_REVIEW_LIMIT", 40, "review")
         _, rules, scope = team_store.review_scope(me["id"]) if me else (None, [], "")
         try:
             result = await review_service.review_text(
@@ -188,8 +233,9 @@ def create_app(
         return result
 
     @app.post("/api/check-website", response_model=SiteCheckResponse)
-    async def check_website(request: SiteRequest):
+    async def check_website(request: SiteRequest, authorization: str | None = Header(default=None)):
         """Open a public website in a browser; review its text and look; suggest visual changes."""
+        signed_in(authorization, "check websites", "ENGANO_SITE_LIMIT", 8, "site")
         try:
             check = await review_service.check_website(request.url)
         except SiteError as exc:
